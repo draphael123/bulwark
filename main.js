@@ -174,19 +174,13 @@ const MAT = {
   ruin:    new THREE.MeshLambertMaterial({ color:0x3a352e }),
 };
 
-// gabled roof prism: width x, height y, depth z (ridge along z)
+// gabled roof prism: width x, height y, depth z (ridge along z).
+// Extrude a triangle so winding/normals come out right on every face.
 function prismGeo(w, h, d) {
-  const g = new THREE.BufferGeometry();
-  const hw = w/2, hd = d/2;
-  const v = [
-    // two triangle end caps + two slopes + bottom (skip bottom)
-    -hw,0,-hd,  hw,0,-hd,  0,h,-hd,
-     hw,0, hd, -hw,0, hd,  0,h, hd,
-    -hw,0,-hd,  0,h,-hd,   0,h,hd,   -hw,0,-hd, 0,h,hd, -hw,0,hd,
-     0,h,-hd,   hw,0,-hd,  hw,0,hd,   0,h,-hd,  hw,0,hd, 0,h,hd,
-  ];
-  g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
-  g.computeVertexNormals();
+  const shape = new THREE.Shape();
+  shape.moveTo(-w/2, 0); shape.lineTo(w/2, 0); shape.lineTo(0, h); shape.closePath();
+  const g = new THREE.ExtrudeGeometry(shape, { depth: d, bevelEnabled: false });
+  g.translate(0, 0, -d/2);
   return g;
 }
 function box(w,h,d,mat,x=0,y=0,z=0){
@@ -396,17 +390,13 @@ function composeWard(sa, ea, D) {
 }
 
 // gates: [{seg, t}] — gate carved into segment `seg` at param t along it.
-// Pass null to auto-place one gate on the longest segment that can host one.
+// Walls are built solid; gates exist only where the player cuts them (Gate tool).
 function buildWallMeshes(verts, closed=true, gates=null) {
   const group = new THREE.Group();
   const n = verts.length;
   const segCount = closed ? n : n-1;
   const segLen = i => Math.hypot(verts[(i+1)%n].x-verts[i].x, verts[(i+1)%n].z-verts[i].z);
-  if (!gates) {
-    let gs = -1, best = GATE_W + 2;
-    for (let i=0;i<segCount;i++) if (segLen(i) > best) { best = segLen(i); gs = i; }
-    gates = gs >= 0 ? [{ seg:gs, t:0.5 }] : [];
-  }
+  if (!gates) gates = [];
   const merlonMats = [];
   for (let i=0;i<segCount;i++){
     const a = verts[i], b = verts[(i+1)%n];
@@ -681,6 +671,7 @@ function tryCloseWall() {
   refreshDepths();
   const inside = state.buildings.filter(b => b.depth > 0 && !b.ruined).length;
   msg(`Ring closed — 🪨${cost}. ${inside} building${inside===1?'':'s'} now behind walls.`, 'good');
+  if (state.walls.length === 1) msg('The ring is solid stone — cut a gate with the Gate tool (0) where you want one.', 'dim');
   const maxDepth = Math.max(...state.buildings.map(b => b.depth), 0);
   if (maxDepth >= 2) msg('An inner ward! Deep wards pay richer taxes.', 'good');
   wallDraft = [];

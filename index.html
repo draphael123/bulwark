@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BULWARK — the wall is the town</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#0d0a06; }
+  body { font-family: Georgia, 'Times New Roman', serif; color:#e8dcc2; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; }
+
+  /* ---------- top resource bar ---------- */
+  #topbar {
+    position:fixed; top:0; left:0; right:0; height:44px;
+    display:flex; align-items:center; gap:22px; padding:0 18px;
+    background:linear-gradient(#241a0eee, #1b140ccc);
+    border-bottom:1px solid #4a3a20; z-index:10; user-select:none;
+    font-size:15px;
+  }
+  #topbar .res { display:flex; align-items:center; gap:6px; min-width:70px; }
+  #topbar .res b { color:#f3e6c8; font-weight:600; }
+  #topbar .res .delta { font-size:11px; color:#9a8a68; }
+  #topbar .spacer { flex:1; }
+  #daycount { color:#d9a44a; letter-spacing:1px; }
+  #raidwarn {
+    display:none; color:#ff6a4d; font-weight:bold; letter-spacing:.5px;
+    animation:pulse 0.9s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+
+  /* ---------- bottom build palette ---------- */
+  #palette {
+    position:fixed; left:50%; bottom:12px; transform:translateX(-50%);
+    display:flex; gap:6px; padding:8px 10px; z-index:10;
+    background:linear-gradient(#241a0eee, #16100acc);
+    border:1px solid #4a3a20; border-radius:10px; user-select:none;
+  }
+  .tool {
+    width:74px; padding:7px 4px 5px; text-align:center; cursor:pointer;
+    border:1px solid #3a2d18; border-radius:7px; background:#1d150c;
+    transition:background .12s, border-color .12s;
+  }
+  .tool:hover { background:#2c2113; border-color:#6b5427; }
+  .tool.active { background:#3a2b12; border-color:#d9a44a; box-shadow:0 0 8px #d9a44a44; }
+  .tool .ico { font-size:20px; line-height:1.2; }
+  .tool .nm { font-size:11px; color:#cbb98f; margin-top:2px; }
+  .tool .cost { font-size:10px; color:#8a7a58; margin-top:1px; }
+  .tool.disabled { opacity:.38; cursor:default; }
+  .tool .key { position:absolute; }
+
+  /* ---------- message log ---------- */
+  #log {
+    position:fixed; left:14px; bottom:14px; z-index:9; width:340px;
+    pointer-events:none; font-size:13px; line-height:1.5;
+  }
+  #log .msg { text-shadow:0 1px 3px #000; opacity:.95; margin-top:2px; }
+  #log .msg.warn { color:#ff9b6a; }
+  #log .msg.good { color:#b8dd8a; }
+  #log .msg.dim  { color:#9a8a68; }
+
+  /* ---------- cursor hint ---------- */
+  #hint {
+    position:fixed; z-index:11; pointer-events:none; display:none;
+    background:#16100ae6; border:1px solid #4a3a20; border-radius:6px;
+    padding:5px 9px; font-size:12px; white-space:pre; line-height:1.5;
+  }
+  #hint .safe { color:#b8dd8a; }
+  #hint .unsafe { color:#ff9b6a; }
+
+  /* ---------- overlays ---------- */
+  .overlay {
+    position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(ellipse at center, #0009, #000d);
+  }
+  .panel {
+    max-width:620px; padding:38px 46px; text-align:center;
+    background:linear-gradient(#241a0e, #17110a);
+    border:1px solid #6b5427; border-radius:14px; box-shadow:0 12px 60px #000c;
+  }
+  .panel h1 { font-size:44px; letter-spacing:10px; color:#d9a44a; margin-bottom:2px; }
+  .panel .tag { font-style:italic; color:#9a8a68; margin-bottom:22px; }
+  .panel p { font-size:15px; line-height:1.65; color:#cbb98f; margin-bottom:14px; text-align:left; }
+  .panel p b { color:#e8dcc2; }
+  .panel button {
+    font-family:inherit; font-size:17px; letter-spacing:2px; cursor:pointer;
+    padding:11px 42px; margin-top:10px; color:#1b140c; background:#d9a44a;
+    border:none; border-radius:8px; font-weight:bold;
+  }
+  .panel button:hover { background:#f0bd63; }
+  .panel .keys { font-size:12.5px; color:#8a7a58; margin-top:16px; line-height:1.7; text-align:left; }
+  #gameover { display:none; }
+  #gameover h1 { color:#ff6a4d; letter-spacing:4px; font-size:34px; }
+
+  #newtown {
+    position:fixed; top:52px; right:14px; z-index:12; font-family:inherit;
+    background:none; border:1px solid #4a3a20; color:#8a7a58; border-radius:6px;
+    padding:4px 12px; font-size:12px; cursor:pointer;
+  }
+  #newtown:hover { color:#d9a44a; border-color:#6b5427; }
+
+  #vignette {
+    position:fixed; inset:0; pointer-events:none; z-index:8; opacity:0;
+    box-shadow:inset 0 0 180px 40px #a3210066; transition:opacity .6s;
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="vignette"></div>
+
+<div id="topbar">
+  <span class="res">🪙 <b id="r-gold">0</b></span>
+  <span class="res">🪵 <b id="r-wood">0</b></span>
+  <span class="res">🪨 <b id="r-stone">0</b></span>
+  <span class="res">🌾 <b id="r-food">0</b><span class="delta" id="d-food"></span></span>
+  <span class="res">👥 <b id="r-pop">0</b></span>
+  <span class="spacer"></span>
+  <span id="raidwarn">⚠ RAIDERS APPROACHING</span>
+  <span class="spacer"></span>
+  <span id="daycount">Day 1</span>
+</div>
+<button id="newtown" title="Erase this town and start over">⟲ New Town</button>
+
+<div id="palette"></div>
+<div id="log"></div>
+<div id="hint"></div>
+
+<div class="overlay" id="intro">
+  <div class="panel">
+    <h1>BULWARK</h1>
+    <div class="tag">the wall is the town</div>
+    <p><b>Draw walls.</b> Everything inside a closed ring is safe from bandits and pays
+       full taxes. Rings within rings make richer wards — the deeper the ward, the higher the rent.</p>
+    <p><b>But the land feeds the town.</b> Farms, woodcutters and quarries sprawl outside,
+       and raiders will burn whatever the walls don't hold. Guard the fields with towers
+       and barracks — or wall them in, if you can afford the stone.</p>
+    <p><b>Protect the Keep.</b> If it falls, the town falls.</p>
+    <button id="startbtn">FOUND THE TOWN</button>
+    <div class="keys">
+      <b>Mouse</b> — left: build / select · right-drag: rotate · wheel: zoom · middle-drag or WASD: pan<br>
+      <b>Wall tool</b> — click to lay vertices, click the first vertex (or Enter) to close the ring, Esc cancels<br>
+      <b>1–9</b> select tools · <b>Esc</b> cancel
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="gameover">
+  <div class="panel">
+    <h1>THE KEEP HAS FALLEN</h1>
+    <p id="go-stats" style="text-align:center"></p>
+    <button id="restartbtn">RAISE IT AGAIN</button>
+  </div>
+</div>
+
+<script type="importmap">{ "imports": { "three": "./lib/three.module.js" } }</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

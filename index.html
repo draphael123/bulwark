@@ -97,12 +97,29 @@
   #gameover { display:none; }
   #gameover h1 { color:#ff6a4d; letter-spacing:4px; font-size:34px; }
 
-  #newtown {
+  #newtown, #gearbtn {
     position:fixed; top:52px; right:14px; z-index:12; font-family:inherit;
     background:none; border:1px solid #4a3a20; color:#8a7a58; border-radius:6px;
     padding:4px 12px; font-size:12px; cursor:pointer;
   }
-  #newtown:hover { color:#d9a44a; border-color:#6b5427; }
+  #newtown:hover, #gearbtn:hover { color:#d9a44a; border-color:#6b5427; }
+  #gearbtn { right:118px; }
+
+  .titlebtns { display:flex; flex-direction:column; gap:10px; align-items:center; margin:18px 0 8px; }
+  .titlebtns button { width:260px; }
+  .panel button.secondary { background:none; border:1px solid #6b5427; color:#d9a44a; }
+  .panel button.secondary:hover { background:#3a2b12; }
+  .setrow { display:flex; align-items:center; gap:14px; margin:10px 0; }
+  .setrow label { width:110px; text-align:right; color:#cbb98f; font-size:14px; }
+  .setrow input[type=range] { flex:1; accent-color:#d9a44a; }
+  .slotrow { display:flex; align-items:center; gap:10px; margin:7px 0; font-size:13px; }
+  .slotrow .snm { width:80px; text-align:right; color:#cbb98f; }
+  .slotrow .smeta { flex:1; color:#8a7a58; text-align:left; }
+  .slotrow button {
+    font-family:inherit; font-size:11px; letter-spacing:1px; cursor:pointer; margin:0;
+    padding:4px 12px; background:none; border:1px solid #4a3a20; color:#cbb98f; border-radius:5px;
+  }
+  .slotrow button:hover { border-color:#d9a44a; color:#d9a44a; }
 
   #vignette {
     position:fixed; inset:0; pointer-events:none; z-index:8; opacity:0;
@@ -145,6 +162,7 @@
   <span id="daycount">Day 1</span>
 </div>
 <button id="newtown" title="Erase this town and start over">⟲ New Town</button>
+<button id="gearbtn" title="Settings & saves">⚙ Settings</button>
 
 <div id="palette"></div>
 <div id="log"></div>
@@ -153,20 +171,32 @@
 <div id="raidarrow">➤</div>
 
 <div class="overlay" id="intro">
-  <div class="panel">
+  <div class="panel title-panel">
     <h1>BULWARK</h1>
     <div class="tag">the wall is the town</div>
-    <p><b>The wall is the town.</b> Ring the Keep in stone — houses and markets can only
-       stand inside walls, and the deeper the ward, the richer the rent. Walls can join
-       other walls to enclose new wards, and gates are cut wherever you choose.</p>
-    <p><b>The land feeds you.</b> Farms and mills sprawl outside — and raiders burn
-       whatever the walls don't hold. If the Keep falls, the town falls.</p>
-    <p style="text-align:center; color:#d9a44a"><b>Follow the Founding Charter, top left.</b></p>
-    <button id="startbtn">FOUND THE TOWN</button>
-    <div class="keys">
-      <b>Mouse</b> — left: build · right-drag: rotate · wheel: zoom · middle-drag or WASD: pan<br>
-      <b>1–9, 0</b> select tools · <b>Esc</b> cancel — the tools themselves will teach you the rest
+    <p style="text-align:center">Ring the Keep in stone. Only inside walls can the town stand —
+       and raiders burn whatever the walls don't hold.</p>
+    <div class="titlebtns">
+      <button id="contbtn" style="display:none">CONTINUE</button>
+      <button id="startbtn" class="secondary">NEW TOWN</button>
+      <button id="titleSettings" class="secondary">SETTINGS</button>
     </div>
+    <div class="keys" style="text-align:center">
+      left-click: build · right-drag: rotate · wheel: zoom · WASD: pan · 1–9, 0: tools · Esc: cancel
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="settings" style="display:none">
+  <div class="panel" style="min-width:460px">
+    <h1 style="font-size:26px; letter-spacing:5px">SETTINGS</h1>
+    <div class="setrow"><label>Music</label><input type="range" id="set-music" min="0" max="100"></div>
+    <div class="setrow"><label>Sounds</label><input type="range" id="set-sfx" min="0" max="100"></div>
+    <div class="setrow"><label>Ambience</label><input type="range" id="set-amb" min="0" max="100"></div>
+    <div class="setrow"><label>Shadows</label><input type="checkbox" id="set-shadows"></div>
+    <h1 style="font-size:16px; letter-spacing:4px; margin-top:18px; color:#cbb98f">LEDGER OF SAVES</h1>
+    <div id="slots"></div>
+    <button id="settingsClose" style="margin-top:16px">CLOSE</button>
   </div>
 </div>
 

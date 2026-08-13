@@ -2,6 +2,7 @@
 // Closed wall rings define wards; nesting depth raises taxes; everything
 // outside the rings is raidable by bandits.
 import * as THREE from 'three';
+import { AudioSys } from './audio.js';
 
 // ---------------------------------------------------------------- constants
 const MAP = 120;              // half-extent of buildable land
@@ -48,7 +49,7 @@ app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x86a3c3);
-scene.fog = new THREE.Fog(0x86a3c3, 180, 420);
+scene.fog = new THREE.Fog(0x86a3c3, 200, 560);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 1, 800);
 const camTarget = new THREE.Vector3(0, 0, 0);
@@ -110,6 +111,11 @@ function updateAtmosphere() {
   sun.position.set(Math.cos(ang)*100, Math.max(35, Math.sin(ang)*130), 40);
   nightFactor = Math.max(0, Math.min(1, 1 - (sun.intensity - 0.3) / 1.0));
   MAT.window.opacity = nightFactor * 0.95;
+  if (starPts) starPts.material.opacity = nightFactor * 0.9;
+  sunSpr.position.set(sun.position.x*3.6, Math.max(50, sun.position.y*3.2), sun.position.z*3.6);
+  sunSpr.material.opacity = (1 - nightFactor) * 0.8;
+  moonSpr.position.set(-sun.position.x*3.6, Math.max(90, sun.position.y*2.4), -sun.position.z*3.6);
+  moonSpr.material.opacity = nightFactor * 0.9;
 }
 
 // ground with baked high-frequency grass speckle
@@ -135,6 +141,7 @@ function valueNoise2(x, z) {
   const a = h(xi,zi), b = h(xi+1,zi), c = h(xi,zi+1), d = h(xi+1,zi+1);
   return a + (b-a)*s(u) + (c-a)*s(v) + (a-b-c+d)*s(u)*s(v);
 }
+const LAKE = { x: 170, z: -150, r: 30 };
 const groundGeo = new THREE.PlaneGeometry(640, 640, 96, 96);
 {
   const pos = groundGeo.attributes.position;
@@ -142,7 +149,8 @@ const groundGeo = new THREE.PlaneGeometry(640, 640, 96, 96);
     const wx = pos.getX(i), wz = -pos.getY(i);          // plane local -> world (pre-rotation)
     const dist = Math.max(Math.abs(wx), Math.abs(wz));
     const m = THREE.MathUtils.smoothstep(dist, MAP+8, MAP+90);
-    pos.setZ(i, m * (valueNoise2(wx*0.02, wz*0.02) * 10 + valueNoise2(wx*0.06, wz*0.06) * 2.5));
+    const lake = 1 - THREE.MathUtils.smoothstep(Math.hypot(wx-LAKE.x, wz-LAKE.z), LAKE.r*0.6, LAKE.r*1.7);
+    pos.setZ(i, m * (valueNoise2(wx*0.02, wz*0.02) * 10 + valueNoise2(wx*0.06, wz*0.06) * 2.5) * (1-lake) - lake*2.4);
   }
   groundGeo.computeVertexNormals();
 }
@@ -150,6 +158,93 @@ const ground = new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({ map: gr
 ground.rotation.x = -Math.PI/2;
 ground.receiveShadow = true;
 scene.add(ground);
+
+// lake water
+{
+  const water = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r, 28),
+    new THREE.MeshLambertMaterial({ color:0x3d6f8e, transparent:true, opacity:0.92 }));
+  water.rotation.x = -Math.PI/2;
+  water.position.set(LAKE.x, -0.5, LAKE.z);
+  scene.add(water);
+}
+
+// distant mountains with snow caps
+{
+  const mtnM = new THREE.MeshLambertMaterial({ color:0x66718a });
+  const snowM = new THREE.MeshLambertMaterial({ color:0xe8edf4 });
+  let ms = 4177;
+  const mr = () => { ms = (ms*1664525+1013904223)>>>0; return ms/4294967296; };
+  for (let i=0;i<16;i++){
+    const a = i/16*Math.PI*2 + mr()*0.35;
+    const r = 300 + mr()*80;
+    const h = 50 + mr()*60;
+    const x = Math.sin(a)*r, z = Math.cos(a)*r;
+    const cy = h*0.5 - 8;
+    const base = new THREE.Mesh(new THREE.ConeGeometry(h*0.62, h, 5), mtnM);
+    base.position.set(x, cy, z);
+    base.rotation.y = mr()*Math.PI;
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(h*0.62*0.34, h*0.32, 5), snowM);
+    cap.position.set(x, cy + h/2 - h*0.16 + 0.05, z);
+    cap.rotation.y = base.rotation.y;
+    scene.add(base, cap);
+  }
+}
+
+// drifting clouds
+const clouds = [];
+{
+  const cm = new THREE.MeshLambertMaterial({ color:0xffffff, transparent:true, opacity:0.8 });
+  let cs = 9231;
+  const cr = () => { cs = (cs*1664525+1013904223)>>>0; return cs/4294967296; };
+  for (let i=0;i<12;i++){
+    const g = new THREE.Group();
+    const nB = 3 + (cr()*3|0);
+    for (let j=0;j<nB;j++){
+      const s = 6 + cr()*9;
+      const m = new THREE.Mesh(new THREE.SphereGeometry(s, 7, 5), cm);
+      m.position.set((cr()-0.5)*s*2.4, (cr()-0.5)*2.5, (cr()-0.5)*s*1.4);
+      m.scale.y = 0.42;
+      g.add(m);
+    }
+    g.position.set((cr()-0.5)*760, 62 + cr()*32, (cr()-0.5)*760);
+    g.userData.speed = 0.9 + cr()*1.4;
+    scene.add(g);
+    clouds.push(g);
+  }
+}
+
+// stars (fade in at night)
+let starPts;
+{
+  const v = [];
+  let ss = 5501;
+  const sr = () => { ss = (ss*1664525+1013904223)>>>0; return ss/4294967296; };
+  for (let i=0;i<450;i++){
+    const t = sr()*Math.PI*2, ph = 0.12 + sr()*1.3, R = 540;
+    v.push(R*Math.sin(ph)*Math.cos(t), R*Math.cos(ph), R*Math.sin(ph)*Math.sin(t));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+  starPts = new THREE.Points(g, new THREE.PointsMaterial({
+    color:0xcfe0ff, size:1.8, sizeAttenuation:false, transparent:true, opacity:0, fog:false }));
+  scene.add(starPts);
+}
+
+// circling birds (daytime only)
+const flocks = [];
+{
+  const bg = new THREE.ConeGeometry(0.5, 1.6, 3);
+  bg.rotateX(Math.PI/2);
+  const bm = new THREE.MeshBasicMaterial({ color:0x2a2620, transparent:true, opacity:1 });
+  let bs = 7717;
+  const br = () => { bs = (bs*1664525+1013904223)>>>0; return bs/4294967296; };
+  for (let f=0; f<3; f++){
+    const g = new THREE.Group();
+    for (let i=0;i<5;i++) g.add(new THREE.Mesh(bg, bm));
+    scene.add(g);
+    flocks.push({ g, mat:bm, cx:(br()-0.5)*260, cz:(br()-0.5)*260, R:30+br()*45, y:26+br()*14, sp:0.12+br()*0.14, ph:br()*6 });
+  }
+}
 
 // ---------------------------------------------------------------- scatter: trees & rocks
 // seeded PRNG so the land is identical every session (saves reference it)
@@ -159,15 +254,17 @@ const trees = [], rocks = [];
 {
   // tree clusters in a rough ring; rocks in a few clumps
   const trunkG = new THREE.CylinderGeometry(0.35, 0.5, 2.4, 6);
-  const leafG  = new THREE.ConeGeometry(2.0, 4.4, 7);
+  const pineG  = new THREE.ConeGeometry(2.0, 4.4, 7);
+  const blobG  = new THREE.IcosahedronGeometry(2.1, 0);
   const trunkM = new THREE.MeshLambertMaterial({ color:0x6e4a2a });
-  const leafM  = new THREE.MeshLambertMaterial({ color:0x3f6b34 });
   const N = 190;
   const trunkI = new THREE.InstancedMesh(trunkG, trunkM, N);
-  const leafI  = new THREE.InstancedMesh(leafG, leafM, N);
-  trunkI.castShadow = leafI.castShadow = true;
+  const pineI  = new THREE.InstancedMesh(pineG, new THREE.MeshLambertMaterial({ color:0xffffff }), N);
+  const blobI  = new THREE.InstancedMesh(blobG, new THREE.MeshLambertMaterial({ color:0xffffff }), N);
+  trunkI.castShadow = pineI.castShadow = blobI.castShadow = true;
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3();
-  let placed = 0, guard = 0;
+  const tCol = new THREE.Color();
+  let placed = 0, nPine = 0, nBlob = 0, guard = 0;
   const clusters = [];
   for (let i=0;i<10;i++){
     const a = i/10 * Math.PI*2 + srand()*0.5;
@@ -180,17 +277,28 @@ const trees = [], rocks = [];
     if (Math.abs(x) > MAP-3 || Math.abs(z) > MAP-3) continue;
     if (Math.hypot(x,z) < 30) continue;
     const sc = 0.8 + srand()*0.6;
+    const broadleaf = srand() < 0.38;
     q.setFromEuler(new THREE.Euler(0, srand()*Math.PI*2, 0));
     s.set(sc, sc, sc);
     m4.compose(new THREE.Vector3(x, 1.2*sc, z), q, s);
     trunkI.setMatrixAt(placed, m4);
-    m4.compose(new THREE.Vector3(x, (2.4+2.2)*sc, z), q, s);
-    leafI.setMatrixAt(placed, m4);
+    if (broadleaf) {
+      m4.compose(new THREE.Vector3(x, (2.4+1.6)*sc, z), q, new THREE.Vector3(sc, sc*0.85, sc));
+      blobI.setMatrixAt(nBlob, m4);
+      // greens with the odd autumn tree
+      blobI.setColorAt(nBlob, srand() < 0.1 ? tCol.setHex(0xb0772f) : tCol.setHSL(0.26+srand()*0.06, 0.42, 0.28+srand()*0.10, THREE.SRGBColorSpace));
+      nBlob++;
+    } else {
+      m4.compose(new THREE.Vector3(x, (2.4+2.2)*sc, z), q, s);
+      pineI.setMatrixAt(nPine, m4);
+      pineI.setColorAt(nPine, tCol.setHSL(0.34+srand()*0.05, 0.34, 0.20+srand()*0.10, THREE.SRGBColorSpace));
+      nPine++;
+    }
     trees.push({ x, z });
     placed++;
   }
-  trunkI.count = leafI.count = placed;
-  scene.add(trunkI, leafI);
+  trunkI.count = placed; pineI.count = nPine; blobI.count = nBlob;
+  scene.add(trunkI, pineI, blobI);
 
   const rockG = new THREE.DodecahedronGeometry(1.4, 0);
   const rockM = new THREE.MeshLambertMaterial({ color:0x8b8b86 });
@@ -225,7 +333,7 @@ const trees = [], rocks = [];
     q.setFromEuler(new THREE.Euler((srand()-0.5)*0.3, srand()*Math.PI, (srand()-0.5)*0.3));
     m4.compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(sc, sc, sc));
     tuftI.setMatrixAt(i, m4);
-    tuftI.setColorAt(i, col.setHSL(0.24 + srand()*0.05, 0.42, 0.30 + srand()*0.10));
+    tuftI.setColorAt(i, col.setHSL(0.24 + srand()*0.05, 0.42, 0.30 + srand()*0.10, THREE.SRGBColorSpace));
   }
   scene.add(tuftI);
 
@@ -403,6 +511,14 @@ function flamePuff(x, y, z) {
   spawnP(x+(Math.random()-0.5)*1.1, y, z+(Math.random()-0.5)*1.1,
     { color:0xff8a2a, life:0.45+Math.random()*0.3, vy:2.4, grow:0.3, scale:0.9, opacity:0.85 });
 }
+
+// sun disc + moon (soft sprites, driven by the atmosphere)
+const sunSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map:P_TEX, color:0xffe9b0, transparent:true, opacity:0.85, fog:false, depthWrite:false }));
+sunSpr.scale.setScalar(46);
+scene.add(sunSpr);
+const moonSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map:P_TEX, color:0xdfe8ff, transparent:true, opacity:0, fog:false, depthWrite:false }));
+moonSpr.scale.setScalar(26);
+scene.add(moonSpr);
 
 function makeRuin(b) {
   const g = new THREE.Group();
@@ -605,6 +721,50 @@ function canWalk(ax, az, bx, bz) {
       if (segsCross(ax,az,bx,bz, s.ax,s.az,s.bx,s.bz)) return false;
   return true;
 }
+function gateWorld(w, g) {
+  const n = w.path.length;
+  const a = w.path[g.seg], b = w.path[(g.seg+1)%n];
+  const len = Math.hypot(b.x-a.x, b.z-a.z);
+  if (len < 0.001) return null;
+  const gc = Math.min(len - GATE_W/2 - 1, Math.max(GATE_W/2 + 1, g.t*len));
+  const ux = (b.x-a.x)/len, uz = (b.z-a.z)/len;
+  return { x: a.x+ux*gc, z: a.z+uz*gc, ux, uz };
+}
+// a raised (closed) portcullis blocks the gap it guards
+function crossesClosedGate(ax, az, bx, bz) {
+  for (const w of state.walls) {
+    for (const g of (w.gates || [])) {
+      if ((g.openT || 0) > 0.6) continue;
+      const p = gateWorld(w, g);
+      if (!p) continue;
+      const hx = p.ux*GATE_W/2, hz = p.uz*GATE_W/2;
+      if (segsCross(ax,az,bx,bz, p.x-hx,p.z-hz, p.x+hx,p.z+hz)) return true;
+    }
+  }
+  return false;
+}
+function passable(ax, az, bx, bz) {
+  return canWalk(ax, az, bx, bz) && !crossesClosedGate(ax, az, bx, bz);
+}
+// townsfolk pull the lever as they approach; the portcullis sinks to let them
+// through and rises behind them. Raiders never learned to work a lever.
+function gateTick(dt) {
+  for (const w of state.walls) {
+    for (const g of (w.gates || [])) {
+      const p = gateWorld(w, g);
+      if (!p) continue;
+      let want = false;
+      for (const v of state.villagers) if (Math.hypot(v.x-p.x, v.z-p.z) < 5) { want = true; break; }
+      if (!want) for (const gd of state.guards) if (Math.hypot(gd.x-p.x, gd.z-p.z) < 5) { want = true; break; }
+      const prev = g.openT || 0;
+      const target = want ? 1 : 0;
+      g.openT = Math.max(0, Math.min(1, prev + Math.sign(target - prev) * dt * 1.7));
+      if (prev <= 0.02 && g.openT > 0.02) AudioSys.play('creak');
+      if (g._door) g._door.position.y = -g.openT * (WALL_H - 0.9);
+      if (g._lever) g._lever.rotation.x = (g.openT - 0.5) * 1.1;
+    }
+  }
+}
 // waypoint path through gate centers (small Dijkstra — node counts stay tiny)
 function findPath(ax, az, bx, bz) {
   if (canWalk(ax, az, bx, bz)) return [{x:bx, z:bz}];
@@ -668,16 +828,17 @@ function buildWallMeshes(verts, closed=true, gates=null) {
     const ang = Math.atan2(b.x-a.x, b.z-a.z);
     const mx = (a.x+b.x)/2, mz = (a.z+b.z)/2;
     const along = (off) => ({ x: mx + Math.sin(ang)*off, z: mz + Math.cos(ang)*off });
-    // gate centers on this segment as along-axis offsets from the midpoint
+    // gate centers on this segment as along-axis offsets from the midpoint,
+    // paired with their gate objects so doors/levers stay bound to state
     const segGates = (len > GATE_W + 2)
       ? gates.filter(g => g.seg === i)
-          .map(g => Math.min(len - GATE_W/2 - 1, Math.max(GATE_W/2 + 1, g.t*len)) - len/2)
-          .sort((p,q) => p-q)
+          .map(g => ({ g, off: Math.min(len - GATE_W/2 - 1, Math.max(GATE_W/2 + 1, g.t*len)) - len/2 }))
+          .sort((p,q) => p.off - q.off)
       : [];
     // wall spans between gates
     let cursor = -len/2;
     const spans = [];
-    for (const gc of segGates) { spans.push([cursor, gc - GATE_W/2]); cursor = gc + GATE_W/2; }
+    for (const sg of segGates) { spans.push([cursor, sg.off - GATE_W/2]); cursor = sg.off + GATE_W/2; }
     spans.push([cursor, len/2]);
     for (const [s0, s1] of spans) {
       const w2 = s1 - s0;
@@ -693,8 +854,9 @@ function buildWallMeshes(verts, closed=true, gates=null) {
         merlonMats.push({ x:q.x, z:q.z, ang });
       }
     }
-    // gatehouses
-    for (const gc of segGates) {
+    // gatehouses + portcullis doors + levers
+    for (const sg of segGates) {
+      const gc = sg.off;
       gatePts.push({ x: along(gc).x, z: along(gc).z });
       for (const s of [-1, 1]) {
         const p = along(gc + s * (GATE_W/2 + 0.6));
@@ -704,6 +866,31 @@ function buildWallMeshes(verts, closed=true, gates=null) {
       const p = along(gc);
       const lintel = box(WALL_T+0.4, 1.6, GATE_W, MAT.stoneD, p.x, WALL_H-0.2, p.z);
       lintel.rotation.y = ang; group.add(lintel);
+      // portcullis: raised (blocking) by default, sinks into the ground to open
+      const door = new THREE.Group();
+      const gh = WALL_H - 1.2, gw = GATE_W - 1.2;
+      for (let k=0;k<5;k++)
+        door.add(box(0.16, gh, 0.16, MAT.ruin, 0, gh/2, -gw/2 + k*gw/4));
+      door.add(box(0.14, 0.16, gw, MAT.ruin, 0, gh*0.35, 0));
+      door.add(box(0.14, 0.16, gw, MAT.ruin, 0, gh*0.75, 0));
+      door.position.set(p.x, 0, p.z);
+      door.rotation.y = ang;
+      group.add(door);
+      sg.g._door = door;
+      sg.g.openT = sg.g.openT || 0;
+      // lever beside the gatehouse
+      const perpX = Math.cos(ang), perpZ = -Math.sin(ang);
+      const lx = p.x + perpX*2.0 + Math.sin(ang)*(GATE_W/2 + 1.4);
+      const lz = p.z + perpZ*2.0 + Math.cos(ang)*(GATE_W/2 + 1.4);
+      group.add(box(0.5, 0.35, 0.5, MAT.stoneD, lx, 0.18, lz));
+      const handle = box(0.09, 0.9, 0.09, MAT.timber, 0, 0.45, 0);
+      const hGrp = new THREE.Group();
+      hGrp.add(handle);
+      hGrp.add(box(0.16, 0.16, 0.16, MAT.banner, 0, 0.9, 0));
+      hGrp.position.set(lx, 0.3, lz);
+      hGrp.rotation.y = ang;
+      group.add(hGrp);
+      sg.g._lever = hGrp;
     }
     // vertex turret
     group.add(cyl(1.1, 1.3, WALL_H+1.6, MAT.stoneD, a.x, (WALL_H+1.6)/2, a.z, 8));
@@ -814,7 +1001,7 @@ function placeBuilding(type, x, z, free=false) {
   scene.add(group);
   const b = { type, x, z, hp:def.hp, maxHp:def.hp, depth:wardDepth(x,z), ruined:false, group, hitFlash:0,
     buildT: free ? 1 : 0, burnT: 0, smolderT: 0 };
-  if (!free) { dustBurst(x, z, Math.max(def.w, def.d)/2 + 0.5, 10); group.scale.setScalar(0.25); }
+  if (!free) { dustBurst(x, z, Math.max(def.w, def.d)/2 + 0.5, 10); group.scale.setScalar(0.25); AudioSys.play('thunk'); }
   group.traverse(o => { o.userData.b = b; });
   state.buildings.push(b);
   return b;
@@ -892,6 +1079,7 @@ function gateClickAt(wx, wz) {
   w.gates.push({ seg: sp.seg, t: sp.t });
   rebuildWall(w);
   msg('Gate cut through the wall.', 'good');
+  AudioSys.play('creak');
   saveGame();
   return true;
 }
@@ -962,6 +1150,7 @@ function tryCloseWall() {
   scene.add(group);
   state.walls.push({ poly: verts, path: verts, closed: true, group, gates, blockers, gatePts });
   state.villagers.forEach(v => { v.path = null; });
+  AudioSys.play('stone');
   if (state.walls.length === 1 && state.raidNum === 0) {
     state.raidTimer = 90;
     msg('Word of a walled town spreads. Raiders will come for its wealth.', 'warn');
@@ -988,6 +1177,7 @@ function setTool(t) {
   }
   document.querySelectorAll('.tool').forEach(el => el.classList.toggle('active', el.dataset.t === tool));
   hintEl.style.display = 'none';
+  if (tool) AudioSys.play('click');
   if (tool && TOOL_HINTS[tool] && !seenHints[tool]) { seenHints[tool] = true; msg(TOOL_HINTS[tool], 'dim'); }
 }
 
@@ -1020,7 +1210,7 @@ function updateObjectives(silent=false) {
   let all = true;
   for (const o of OBJECTIVES) {
     if (!objDone[o.id]) {
-      if (o.test()) { objDone[o.id] = true; if (!silent) msg(`✔ ${o.label}`, 'good'); }
+      if (o.test()) { objDone[o.id] = true; if (!silent) { msg(`✔ ${o.label}`, 'good'); AudioSys.play('chime'); } }
       else all = false;
     }
   }
@@ -1179,6 +1369,7 @@ function spawnRaid() {
     });
   }
   msg(`${size} raiders ride in from the ${e.name.toLowerCase()}!`, 'warn');
+  AudioSys.play('horn');
   scheduleRaid();
 }
 
@@ -1252,10 +1443,10 @@ function moveToward(a, tx, tz, dt) {
   a._moved = true;
   let nx = a.x + (tx-a.x)/d * a.speed * dt;
   let nz = a.z + (tz-a.z)/d * a.speed * dt;
-  // walls are solid: slide along them instead of ghosting through
-  if (!canWalk(a.x, a.z, nx, nz)) {
-    if (canWalk(a.x, a.z, nx, a.z)) nz = a.z;
-    else if (canWalk(a.x, a.z, a.x, nz)) nx = a.x;
+  // walls and raised gates are solid: slide along them instead of ghosting through
+  if (!passable(a.x, a.z, nx, nz)) {
+    if (passable(a.x, a.z, nx, a.z)) nz = a.z;
+    else if (passable(a.x, a.z, a.x, nz)) nx = a.x;
     else { nx = a.x; nz = a.z; }
   }
   a.x = nx; a.z = nz;
@@ -1275,6 +1466,7 @@ function moveToward(a, tx, tz, dt) {
 }
 function removeBandit(bd) {
   smokePuff(bd.x, 0.8, bd.z);
+  AudioSys.play('fall');
   scene.remove(bd.grp);
   const i = state.bandits.indexOf(bd);
   if (i >= 0) state.bandits.splice(i, 1);
@@ -1284,6 +1476,7 @@ function removeBandit(bd) {
 function destroyBuilding(b, byBandit=null) {
   b.ruined = true; b.hp = 0;
   b.burnT = 0; b.smolderT = 25;
+  AudioSys.play('crash');
   for (let i=0;i<6;i++) { flamePuff(b.x, 1.5, b.z); smokePuff(b.x, 2.0, b.z, true); }
   scene.remove(b.group);
   b.group = makeRuin(b);
@@ -1446,6 +1639,7 @@ const keys = {};
 addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'Escape') {
+    if ($('settings').style.display !== 'none') { $('settings').style.display = 'none'; return; }
     if (tool === 'wall' && wallDraft.length) { wallDraft = []; startAttach = null; redrawWallPreview(); }
     else setTool(null);
   }
@@ -1549,14 +1743,15 @@ $('newtown').onclick = () => {
 };
 
 // ---------------------------------------------------------------- save / load
-function saveGame() {
+function saveGame(key = 'bulwark-save') {
   if (state.over || !state.started) return;
   try {
-    localStorage.setItem('bulwark-save', JSON.stringify({
+    localStorage.setItem(key, JSON.stringify({
       gold:state.gold, wood:state.wood, stone:state.stone, food:state.food,
       pop:state.pop, time:state.time, raidNum:state.raidNum,
       buildings: state.buildings.map(b => ({ type:b.type, x:b.x, z:b.z, hp:b.hp, ruined:b.ruined })),
-      walls: state.walls.map(w => ({ poly:w.poly, path:w.path, closed:w.closed, gates:w.gates })),
+      walls: state.walls.map(w => ({ poly:w.poly, path:w.path, closed:w.closed,
+        gates: w.gates.map(g => ({ seg:g.seg, t:g.t })) })),   // strip runtime door refs
     }));
   } catch (e) {}
 }
@@ -1628,6 +1823,7 @@ function step(dt) {
   for (const a of [...state.arrows]) arrowTick(a, dt);
   villagerTick(dt);
   sentryTick(dt);
+  gateTick(dt);
   // walk-cycle pass: reads the _moved flags the ticks above just set
   const figures = [...state.bandits, ...state.guards, ...state.villagers];
   for (const w of state.walls) if (w.sentries) figures.push(...w.sentries);
@@ -1714,8 +1910,24 @@ function frame(dt) {
   } else hintEl.style.display = 'none';
 
   // visual pass: atmosphere, particles, build-in scaling, fire & smoke
+  if (!state.started) camYaw += dt * 0.05;   // slow orbit behind the title screen
   updateAtmosphere();
+  AudioSys.update(dt, nightFactor);
   updateParticles(dt);
+  for (const c of clouds) {
+    c.position.x += c.userData.speed * dt;
+    if (c.position.x > 420) c.position.x = -420;
+  }
+  for (const fl of flocks) {
+    fl.ph += dt * fl.sp;
+    fl.g.visible = nightFactor < 0.75;
+    fl.mat.opacity = Math.max(0, 1 - nightFactor * 1.3);
+    fl.g.children.forEach((b, i) => {
+      const a = fl.ph + i * 0.35;
+      b.position.set(fl.cx + Math.cos(a) * fl.R, fl.y + Math.sin(a * 3 + i) * 1.5, fl.cz + Math.sin(a) * fl.R);
+      b.rotation.y = -a;
+    });
+  }
   for (const b of state.buildings) {
     if (b.buildT < 1) {
       b.buildT = Math.min(1, b.buildT + dt);
@@ -1786,16 +1998,96 @@ setInterval(() => {
   if (now - lastRAF > 500) { advance(now); frame(0.05); }
 }, 300);
 
+// ---------------------------------------------------------------- settings & saves
+const settings = Object.assign({ music:70, sfx:80, amb:60, shadows:true },
+  JSON.parse(localStorage.getItem('bulwark-settings') || '{}'));
+function applySettings(persist = true) {
+  AudioSys.setVolumes({ music:settings.music/100, sfx:settings.sfx/100, amb:settings.amb/100 });
+  sun.castShadow = settings.shadows;
+  renderer.shadowMap.needsUpdate = true;
+  if (persist) localStorage.setItem('bulwark-settings', JSON.stringify(settings));
+}
+function slotMeta(key) {
+  try {
+    const s = JSON.parse(localStorage.getItem(key));
+    if (!s) return null;
+    return `Day ${Math.floor(s.time/DAY)+1} · ${Math.floor(s.pop)} folk · 🪙${Math.floor(s.gold)}`;
+  } catch (e) { return null; }
+}
+function renderSlots() {
+  const rows = [
+    ['bulwark-save', 'Autosave', false],
+    ['bulwark-slot-1', 'Slot 1', true],
+    ['bulwark-slot-2', 'Slot 2', true],
+    ['bulwark-slot-3', 'Slot 3', true],
+  ];
+  const el = $('slots');
+  el.innerHTML = '';
+  for (const [key, nm, canSave] of rows) {
+    const meta = slotMeta(key);
+    const row = document.createElement('div');
+    row.className = 'slotrow';
+    row.innerHTML = `<span class="snm">${nm}</span><span class="smeta">${meta || '— empty —'}</span>`;
+    if (canSave && state.started && !state.over) {
+      const b = document.createElement('button');
+      b.textContent = 'SAVE';
+      b.onclick = () => { saveGame(key); renderSlots(); AudioSys.play('coin'); };
+      row.appendChild(b);
+    }
+    if (meta) {
+      const b = document.createElement('button');
+      b.textContent = 'LOAD';
+      b.onclick = () => { localStorage.setItem('bulwark-boot-slot', key); location.reload(); };
+      row.appendChild(b);
+    }
+    el.appendChild(row);
+  }
+}
+function openSettings() {
+  $('set-music').value = settings.music;
+  $('set-sfx').value = settings.sfx;
+  $('set-amb').value = settings.amb;
+  $('set-shadows').checked = settings.shadows;
+  renderSlots();
+  $('settings').style.display = 'flex';
+}
+$('set-music').oninput = e => { settings.music = +e.target.value; applySettings(); };
+$('set-sfx').oninput = e => { settings.sfx = +e.target.value; applySettings(); AudioSys.play('click'); };
+$('set-amb').oninput = e => { settings.amb = +e.target.value; applySettings(); };
+$('set-shadows').onchange = e => { settings.shadows = e.target.checked; applySettings(); };
+$('settingsClose').onclick = () => { $('settings').style.display = 'none'; };
+$('gearbtn').onclick = openSettings;
+$('titleSettings').onclick = openSettings;
+applySettings(false);
+
 // ---------------------------------------------------------------- boot
-$('startbtn').onclick = () => {
+function startGame(cont) {
   $('intro').style.display = 'none';
   state.started = true;
-  if (!loadGame()) newTownSetup();
-  else {
-    msg('The town wakes. (Autosave restored — ⟲ New Town to start fresh.)', 'dim');
+  AudioSys.init();
+  applySettings(false);
+  if (cont && loadGame()) {
+    msg('The town wakes.', 'dim');
     updateObjectives(true);   // seed the charter from restored progress, silently
+  } else newTownSetup();
+}
+{
+  const bootSlot = localStorage.getItem('bulwark-boot-slot');
+  if (bootSlot) {
+    localStorage.removeItem('bulwark-boot-slot');
+    const data = localStorage.getItem(bootSlot);
+    if (data) localStorage.setItem('bulwark-save', data);
+    startGame(true);
+  } else {
+    if (localStorage.getItem('bulwark-save')) $('contbtn').style.display = '';
+    $('contbtn').onclick = () => startGame(true);
+    $('startbtn').onclick = () => {
+      if (localStorage.getItem('bulwark-save') && !confirm('Start a new town? The current autosave will be overwritten.')) return;
+      localStorage.removeItem('bulwark-save');
+      startGame(false);
+    };
   }
-};
+}
 
 // headless / test hooks (per project convention: expose sim + step)
 window.BULWARK = {

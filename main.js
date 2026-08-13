@@ -11,16 +11,17 @@ const WALL_H = 5, WALL_T = 1.4;
 const GATE_W = 6;
 
 const BUILD_DEFS = {
-  house:      { nm:'House',      ico:'🏠', w:3,  d:3,  hp:60,  cost:{wood:20},            popCap:4 },
+  house:      { nm:'House',      ico:'🏠', w:3,  d:3,  hp:60,  cost:{wood:20},            popCap:4, needsWard:true },
   farm:       { nm:'Farm',       ico:'🌾', w:6,  d:6,  hp:50,  cost:{wood:30},            foodPerDay:12 },
   woodcutter: { nm:'Woodcutter', ico:'🪵', w:3,  d:3,  hp:50,  cost:{wood:10, gold:10},   woodPerDay:8, needsTrees:2 },
   quarry:     { nm:'Quarry',     ico:'⛏️', w:4,  d:4,  hp:80,  cost:{wood:25, gold:15},   stonePerDay:8, needsRocks:2 },
-  market:     { nm:'Market',     ico:'🏪', w:4,  d:4,  hp:80,  cost:{wood:40, stone:20},  boostR:18 },
+  market:     { nm:'Market',     ico:'🏪', w:4,  d:4,  hp:80,  cost:{wood:40, stone:20},  boostR:18, needsWard:true },
   tower:      { nm:'Watchtower', ico:'🗼', w:2,  d:2,  hp:120, cost:{wood:20, stone:30},  range:24, dps:11 },
   barracks:   { nm:'Barracks',   ico:'⚔️', w:4,  d:4,  hp:120, cost:{wood:40, stone:30, gold:50}, guards:3 },
   keep:       { nm:'Keep',       ico:'🏰', w:6,  d:6,  hp:400, cost:{},                   popCap:8 },
 };
-const TOOL_ORDER = ['house','farm','woodcutter','quarry','market','tower','barracks','wall','gate','demolish'];
+// walls first, then the town: the toolbar teaches the build order
+const TOOL_ORDER = ['wall','gate','house','farm','woodcutter','quarry','market','tower','barracks','demolish'];
 const GATE_COST = 10; // stone, for the Gate tool
 
 // ---------------------------------------------------------------- state
@@ -522,6 +523,7 @@ function countNear(list, x, z, r) {
 function placementCheck(type, x, z) {
   const def = BUILD_DEFS[type];
   if (Math.abs(x) > MAP || Math.abs(z) > MAP) return { ok:false, why:'Beyond the town lands' };
+  if (def.needsWard && wardDepth(x, z) === 0) return { ok:false, why:`A ${def.nm.toLowerCase()} must stand inside walls — raise the ward first` };
   if (overlapsBuilding(x, z, def.w, def.d)) return { ok:false, why:'Blocked by a building' };
   if (nearWall(x, z, Math.max(def.w, def.d)/2 + 1.2)) return { ok:false, why:'Too close to a wall' };
   if (def.needsTrees && countNear(trees, x, z, 15) < def.needsTrees) return { ok:false, why:`Needs ${def.needsTrees}+ trees within reach` };
@@ -1178,10 +1180,9 @@ function loadGame() {
 
 function newTownSetup() {
   placeBuilding('keep', 0, 0, true);
-  placeBuilding('house', -7, 3, true);
-  placeBuilding('house', 6, -5, true);
-  msg('Welcome to the valley. The Keep stands unwalled — raiders arrive on day 3.', 'warn');
-  msg('Lay your first ring of stone (Wall tool, key 8).', 'dim');
+  msg('Welcome to the valley. The Keep stands alone — raiders arrive on day 3.', 'warn');
+  msg('Walls first: ring the Keep in stone (Wall tool, key 1).', 'dim');
+  msg('Then raise houses inside the ward — the town lives behind walls.', 'dim');
 }
 
 // ---------------------------------------------------------------- main loop

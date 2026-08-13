@@ -20,7 +20,8 @@ const BUILD_DEFS = {
   barracks:   { nm:'Barracks',   ico:'⚔️', w:4,  d:4,  hp:120, cost:{wood:40, stone:30, gold:50}, guards:3 },
   keep:       { nm:'Keep',       ico:'🏰', w:6,  d:6,  hp:400, cost:{},                   popCap:8 },
 };
-const TOOL_ORDER = ['house','farm','woodcutter','quarry','market','tower','barracks','wall','demolish'];
+const TOOL_ORDER = ['house','farm','woodcutter','quarry','market','tower','barracks','wall','gate','demolish'];
+const GATE_COST = 10; // stone, for the Gate tool
 
 // ---------------------------------------------------------------- state
 const state = {
@@ -265,14 +266,66 @@ function makeRuin(b) {
   return g;
 }
 
-// agents
-function makeFigure(bodyColor) {
+// agents — little articulated folk: legs/arms pivot at hip/shoulder for a walk cycle
+function makeFigure(bodyColor, role='villager') {
   const g = new THREE.Group();
-  const body = cyl(0.32, 0.42, 1.0, new THREE.MeshLambertMaterial({ color:bodyColor }), 0, 0.6, 0, 6);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 6), new THREE.MeshLambertMaterial({ color:0xdbb894 }));
-  head.position.y = 1.35; head.castShadow = true;
-  g.add(body, head);
+  const mat = c => new THREE.MeshLambertMaterial({ color:c });
+  const bodyM = mat(bodyColor), skinM = mat(0xdbb894), darkM = mat(0x3a2d20);
+
+  const legGeo = new THREE.BoxGeometry(0.16, 0.5, 0.2); legGeo.translate(0, -0.25, 0);
+  const legL = new THREE.Mesh(legGeo, darkM); legL.position.set(-0.11, 0.5, 0);
+  const legR = new THREE.Mesh(legGeo, darkM.clone()); legR.position.set(0.11, 0.5, 0);
+
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.55, 0.3), bodyM); torso.position.y = 0.78;
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.09, 0.32), darkM); belt.position.y = 0.53;
+
+  const armGeo = new THREE.BoxGeometry(0.13, 0.46, 0.16); armGeo.translate(0, -0.18, 0);
+  const armL = new THREE.Mesh(armGeo, bodyM.clone()); armL.position.set(-0.30, 1.0, 0);
+  const armR = new THREE.Mesh(armGeo, bodyM.clone()); armR.position.set(0.30, 1.0, 0);
+  const handGeo = new THREE.BoxGeometry(0.12, 0.1, 0.14); handGeo.translate(0, -0.42, 0);
+  armL.add(new THREE.Mesh(handGeo, skinM));
+  armR.add(new THREE.Mesh(handGeo, skinM.clone()));
+
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 0.26), skinM); head.position.y = 1.22;
+
+  g.add(legL, legR, torso, belt, armL, armR, head);
+
+  if (role === 'villager') {
+    const hat = cone(0.30, 0.16, mat(0xc9a86a), 0, 1.42, 0, 8);   // straw hat
+    hat.scale.y = 0.7; g.add(hat);
+  } else if (role === 'guard') {
+    g.add(cyl(0.17, 0.19, 0.16, mat(0x8d949c), 0, 1.40, 0, 8));   // helmet
+    g.add(cone(0.19, 0.14, mat(0x8d949c), 0, 1.52, 0, 8));
+    const spear = cyl(0.03, 0.03, 1.7, mat(0x6e4a2a), 0, -0.25, 0, 5);
+    spear.add(cone(0.06, 0.18, mat(0xb9bec4), 0, 0.94, 0, 6));
+    armR.add(spear);                                              // carried in the right hand
+    const shield = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.42, 0.34), mat(0x7a3020));
+    shield.position.set(-0.09, -0.3, 0); armL.add(shield);
+  } else if (role === 'bandit') {
+    const hood = cone(0.24, 0.34, darkM.clone(), 0, 1.38, 0, 7);  // dark hood
+    g.add(hood);
+    const mask = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.10, 0.05), darkM.clone());
+    mask.position.set(0, 1.20, 0.14); g.add(mask);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.5, 0.12), mat(0xb9bec4));
+    blade.position.set(0, -0.6, 0.1); armR.add(blade);
+  }
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  g.userData.limbs = { legL, legR, armL, armR };
   return g;
+}
+
+// walk-cycle animation: swing limbs while moving, settle when still
+function animateFigure(a, dt) {
+  const L = a.grp.userData.limbs;
+  if (!L) return;
+  const target = a._moved ? 0.55 : 0;
+  a._swing = (a._swing || 0) + (target - (a._swing || 0)) * Math.min(1, dt*10);
+  const s = Math.sin(a.bob) * a._swing;
+  L.legL.rotation.x = s;
+  L.legR.rotation.x = -s;
+  L.armL.rotation.x = -s * 0.7;
+  L.armR.rotation.x = s * 0.7;
+  a.grp.position.y = Math.abs(Math.sin(a.bob)) * 0.06 * a._swing;
 }
 
 // ---------------------------------------------------------------- walls
@@ -286,7 +339,7 @@ function pointInPoly(x, z, verts) {
 }
 function wardDepth(x, z) {
   let d = 0;
-  for (const w of state.walls) if (pointInPoly(x, z, w.verts)) d++;
+  for (const w of state.walls) if (pointInPoly(x, z, w.poly)) d++;
   return d;
 }
 function distToSeg(px, pz, ax, az, bx, bz) {
@@ -294,60 +347,116 @@ function distToSeg(px, pz, ax, az, bx, bz) {
   const t = Math.max(0, Math.min(1, ((px-ax)*dx + (pz-az)*dz) / (dx*dx+dz*dz || 1)));
   return Math.hypot(px-(ax+dx*t), pz-(az+dz*t));
 }
+function shoelace(poly) {
+  let s = 0;
+  for (let i=0, j=poly.length-1; i<poly.length; j=i++)
+    s += (poly[j].x + poly[i].x) * (poly[j].z - poly[i].z);
+  return s / 2;
+}
 
-function buildWallMeshes(verts) {
+// snap a point onto the nearest BUILT wall segment (for joining walls)
+const SNAP_R = 3.2;
+function wallSnap(x, z) {
+  let best = null, bestD = SNAP_R;
+  for (const w of state.walls) {
+    const n = w.path.length, segs = w.closed ? n : n-1;
+    for (let i=0;i<segs;i++){
+      const a = w.path[i], b = w.path[(i+1)%n];
+      const dx = b.x-a.x, dz = b.z-a.z;
+      let t = ((x-a.x)*dx + (z-a.z)*dz) / (dx*dx+dz*dz || 1);
+      t = Math.max(0, Math.min(1, t));
+      const px = a.x+dx*t, pz = a.z+dz*t;
+      const d = Math.hypot(x-px, z-pz);
+      if (d < bestD) { bestD = d; best = { wall:w, seg:i, t, x:px, z:pz }; }
+    }
+  }
+  return best;
+}
+
+// draft path D attached at both ends to the same wall: the new ward polygon is
+// D plus one of the two arcs of the host polygon between the attachment points.
+// The smaller-area candidate is correct for both an outward annex (the bulge)
+// and an inward partition (the carved-out inner ward).
+function composeWard(sa, ea, D) {
+  const ring = sa.wall.poly, n = ring.length;
+  const arc = (aSeg, aT, aPt, bSeg, bT, bPt) => {
+    const pts = [{ x:aPt.x, z:aPt.z }];
+    if (aSeg === bSeg && aT <= bT) { pts.push({ x:bPt.x, z:bPt.z }); return pts; }
+    let k = aSeg;
+    do { k = (k+1)%n; pts.push({ x:ring[k].x, z:ring[k].z }); } while (k !== bSeg);
+    pts.push({ x:bPt.x, z:bPt.z });
+    return pts;
+  };
+  const pS = { x:sa.x, z:sa.z }, pE = { x:ea.x, z:ea.z };
+  const polyA = D.concat(arc(ea.seg, ea.t, pE, sa.seg, sa.t, pS).slice(1, -1));
+  const polyB = D.concat(arc(sa.seg, sa.t, pS, ea.seg, ea.t, pE).slice(1, -1).reverse());
+  const area = p => Math.abs(shoelace(p));
+  const cand = [polyA, polyB].filter(p => p.length >= 3).sort((p,q) => area(p) - area(q));
+  return (cand[0] && area(cand[0]) > 16) ? cand[0] : null;
+}
+
+// gates: [{seg, t}] — gate carved into segment `seg` at param t along it.
+// Pass null to auto-place one gate on the longest segment that can host one.
+function buildWallMeshes(verts, closed=true, gates=null) {
   const group = new THREE.Group();
   const n = verts.length;
-  // longest segment hosts the gate
-  let gateSeg = 0, best = 0;
-  for (let i=0;i<n;i++){
-    const a = verts[i], b = verts[(i+1)%n];
-    const len = Math.hypot(b.x-a.x, b.z-a.z);
-    if (len > best) { best = len; gateSeg = i; }
+  const segCount = closed ? n : n-1;
+  const segLen = i => Math.hypot(verts[(i+1)%n].x-verts[i].x, verts[(i+1)%n].z-verts[i].z);
+  if (!gates) {
+    let gs = -1, best = GATE_W + 2;
+    for (let i=0;i<segCount;i++) if (segLen(i) > best) { best = segLen(i); gs = i; }
+    gates = gs >= 0 ? [{ seg:gs, t:0.5 }] : [];
   }
   const merlonMats = [];
-  for (let i=0;i<n;i++){
+  for (let i=0;i<segCount;i++){
     const a = verts[i], b = verts[(i+1)%n];
-    const len = Math.hypot(b.x-a.x, b.z-a.z);
+    const len = segLen(i);
     const ang = Math.atan2(b.x-a.x, b.z-a.z);
     const mx = (a.x+b.x)/2, mz = (a.z+b.z)/2;
-    if (i === gateSeg && len > GATE_W + 4) {
-      // two flanking wall pieces + gatehouse
-      const side = (len - GATE_W) / 2;
-      for (const s of [-1, 1]) {
-        const off = s * (GATE_W/2 + side/2);
-        const w = box(WALL_T, WALL_H, side, MAT.stone, mx + Math.sin(ang)*off, WALL_H/2, mz + Math.cos(ang)*off);
-        w.rotation.y = ang; group.add(w);
-      }
-      // gatehouse towers + lintel
-      for (const s of [-1, 1]) {
-        const off = s * (GATE_W/2 + 0.6);
-        const t = cyl(1.2, 1.4, WALL_H+2.4, MAT.stoneD, mx + Math.sin(ang)*off, (WALL_H+2.4)/2, mz + Math.cos(ang)*off, 8);
-        group.add(t);
-        group.add(cone(1.5, 1.7, MAT.roofB, mx + Math.sin(ang)*off, WALL_H+3.3, mz + Math.cos(ang)*off, 8));
-      }
-      const lintel = box(WALL_T+0.4, 1.6, GATE_W, MAT.stoneD, mx, WALL_H-0.2, mz);
-      lintel.rotation.y = ang; group.add(lintel);
-      // merlons over the flanks
-      for (const s of [-1,1]) {
-        const cnt = Math.floor(side/2.2);
-        for (let k=0;k<cnt;k++){
-          const t2 = s * (GATE_W/2 + (k+0.5) * side/cnt);
-          merlonMats.push({ x:mx+Math.sin(ang)*t2, z:mz+Math.cos(ang)*t2, ang });
-        }
-      }
-    } else {
-      const w = box(WALL_T, WALL_H, len, MAT.stone, mx, WALL_H/2, mz);
+    const along = (off) => ({ x: mx + Math.sin(ang)*off, z: mz + Math.cos(ang)*off });
+    // gate centers on this segment as along-axis offsets from the midpoint
+    const segGates = (len > GATE_W + 2)
+      ? gates.filter(g => g.seg === i)
+          .map(g => Math.min(len - GATE_W/2 - 1, Math.max(GATE_W/2 + 1, g.t*len)) - len/2)
+          .sort((p,q) => p-q)
+      : [];
+    // wall spans between gates
+    let cursor = -len/2;
+    const spans = [];
+    for (const gc of segGates) { spans.push([cursor, gc - GATE_W/2]); cursor = gc + GATE_W/2; }
+    spans.push([cursor, len/2]);
+    for (const [s0, s1] of spans) {
+      const w2 = s1 - s0;
+      if (w2 < 0.4) continue;
+      const p = along((s0+s1)/2);
+      const w = box(WALL_T, WALL_H, w2, MAT.stone, p.x, WALL_H/2, p.z);
       w.rotation.y = ang; group.add(w);
-      const cnt = Math.floor(len/2.2);
+      const cnt = Math.floor(w2/2.2);
       for (let k=0;k<cnt;k++){
-        const t2 = -len/2 + (k+0.5)*len/cnt;
-        merlonMats.push({ x:mx+Math.sin(ang)*t2, z:mz+Math.cos(ang)*t2, ang });
+        const q = along(s0 + (k+0.5)*w2/cnt);
+        merlonMats.push({ x:q.x, z:q.z, ang });
       }
+    }
+    // gatehouses
+    for (const gc of segGates) {
+      for (const s of [-1, 1]) {
+        const p = along(gc + s * (GATE_W/2 + 0.6));
+        group.add(cyl(1.2, 1.4, WALL_H+2.4, MAT.stoneD, p.x, (WALL_H+2.4)/2, p.z, 8));
+        group.add(cone(1.5, 1.7, MAT.roofB, p.x, WALL_H+3.3, p.z, 8));
+      }
+      const p = along(gc);
+      const lintel = box(WALL_T+0.4, 1.6, GATE_W, MAT.stoneD, p.x, WALL_H-0.2, p.z);
+      lintel.rotation.y = ang; group.add(lintel);
     }
     // vertex turret
     group.add(cyl(1.1, 1.3, WALL_H+1.6, MAT.stoneD, a.x, (WALL_H+1.6)/2, a.z, 8));
     group.add(cone(1.4, 1.5, MAT.roofB, a.x, WALL_H+2.3, a.z, 8));
+  }
+  if (!closed) {
+    // turret on the far attachment point too
+    const e = verts[n-1];
+    group.add(cyl(1.1, 1.3, WALL_H+1.6, MAT.stoneD, e.x, (WALL_H+1.6)/2, e.z, 8));
+    group.add(cone(1.4, 1.5, MAT.roofB, e.x, WALL_H+2.3, e.z, 8));
   }
   // instanced merlons
   if (merlonMats.length) {
@@ -361,7 +470,15 @@ function buildWallMeshes(verts) {
     });
     group.add(im);
   }
-  return { group, gateSeg };
+  return { group, gates };
+}
+
+// rebuild one wall's meshes in place (after adding a gate)
+function rebuildWall(w) {
+  scene.remove(w.group);
+  const r = buildWallMeshes(w.path, w.closed, w.gates);
+  w.group = r.group;
+  scene.add(w.group);
 }
 
 function refreshDepths() {
@@ -372,6 +489,7 @@ function refreshDepths() {
 let tool = null;                 // current tool key or null
 let ghost = null;                // ghost mesh group
 let wallDraft = [];              // verts while drawing a wall
+let startAttach = null;          // wallSnap result where the draft began on a wall
 let wallPreview = new THREE.Group();
 scene.add(wallPreview);
 
@@ -397,9 +515,9 @@ function overlapsBuilding(x, z, w, d, ignore=null) {
 }
 function nearWall(x, z, r) {
   for (const wl of state.walls) {
-    const n = wl.verts.length;
-    for (let i=0;i<n;i++){
-      const a = wl.verts[i], b2 = wl.verts[(i+1)%n];
+    const n = wl.path.length, segs = wl.closed ? n : n-1;
+    for (let i=0;i<segs;i++){
+      const a = wl.path[i], b2 = wl.path[(i+1)%n];
       if (distToSeg(x, z, a.x, a.z, b2.x, b2.z) < r) return true;
     }
   }
@@ -453,19 +571,88 @@ function wallDraftCost() {
   let len = 0;
   for (let i=1;i<wallDraft.length;i++)
     len += Math.hypot(wallDraft[i].x-wallDraft[i-1].x, wallDraft[i].z-wallDraft[i-1].z);
-  if (wallDraft.length >= 3) {
+  // a free-standing draft will close back to its first corner; a joined draft won't
+  if (!startAttach && wallDraft.length >= 3) {
     const a = wallDraft[wallDraft.length-1], b = wallDraft[0];
     len += Math.hypot(b.x-a.x, b.z-a.z);
   }
   return Math.ceil(len * WALL_COST_PER_UNIT);
 }
 
+function wallSegsCrossBuilding(pts, closed) {
+  const n = pts.length, segs = closed ? n : n-1;
+  for (const b of state.buildings) {
+    const def = BUILD_DEFS[b.type];
+    for (let i=0;i<segs;i++){
+      const a = pts[i], c = pts[(i+1)%n];
+      if (distToSeg(b.x, b.z, a.x, a.z, c.x, c.z) < Math.max(def.w, def.d)/2 + 1.0) return def;
+    }
+  }
+  return null;
+}
+
+function completeConnector(endAttach) {
+  const D = wallDraft.map(v => ({ x:v.x, z:v.z }));
+  const cost = wallDraftCost();
+  if (state.stone < cost) { msg(`Not enough stone — this wall costs 🪨${cost}.`, 'warn'); wallDraft.pop(); return; }
+  const hit = wallSegsCrossBuilding(D, false);
+  if (hit) { msg(`The wall would cut through a ${hit.nm.toLowerCase()}. Route it around.`, 'warn'); wallDraft.pop(); return; }
+  const poly = composeWard(startAttach, endAttach, D);
+  if (!poly) { msg('That ward would be too small — give it more room.', 'warn'); wallDraft.pop(); return; }
+  state.stone -= cost;
+  const { group, gates } = buildWallMeshes(D, false);
+  scene.add(group);
+  state.walls.push({ poly, path:D, closed:false, group, gates });
+  refreshDepths();
+  const inside = state.buildings.filter(b => b.depth > 0 && !b.ruined).length;
+  msg(`Walls joined — 🪨${cost}. A new ward is enclosed (${inside} building${inside===1?'':'s'} behind walls).`, 'good');
+  const maxDepth = Math.max(...state.buildings.map(b => b.depth), 0);
+  if (maxDepth >= 2) msg('An inner ward! Deep wards pay richer taxes.', 'good');
+  wallDraft = []; startAttach = null;
+  redrawWallPreview();
+  saveGame();
+}
+
+// one wall-tool click at world coords (shared by mouse input and test hooks)
+function wallClickAt(wx, wz) {
+  const sp = wallSnap(wx, wz);
+  if (sp) {
+    if (!wallDraft.length) {
+      // begin a joined wall on an existing one
+      startAttach = sp;
+      wallDraft.push({ x:sp.x, z:sp.z });
+      redrawWallPreview();
+      return;
+    }
+    if (startAttach) {
+      if (sp.wall !== startAttach.wall) { msg('Both ends must join the same wall.', 'warn'); return; }
+      wallDraft.push({ x:sp.x, z:sp.z });
+      completeConnector(sp);
+      return;
+    }
+    // free-standing draft ending on a wall isn't a ring — ignore the snap, treat as a corner
+  }
+  const x = snap(wx), z = snap(wz);
+  if (Math.abs(x) > MAP || Math.abs(z) > MAP) return;
+  if (!startAttach && wallDraft.length >= 3 && Math.hypot(x-wallDraft[0].x, z-wallDraft[0].z) < 3.5) { tryCloseWall(); return; }
+  if (wallDraft.length && Math.hypot(x-wallDraft[wallDraft.length-1].x, z-wallDraft[wallDraft.length-1].z) < 2) return;
+  wallDraft.push({ x, z });
+  redrawWallPreview();
+}
+
 function redrawWallPreview() {
   wallPreview.clear();
   const pts = [...wallDraft];
-  if (pts.length && tool === 'wall') pts.push({ x:mouseGround.x, z:mouseGround.z });
+  let cursorSnapped = false;
+  if (tool === 'wall') {
+    const sp = wallSnap(mouseGround.x, mouseGround.z);
+    cursorSnapped = !!sp;
+    if (pts.length || sp) pts.push(sp ? { x:sp.x, z:sp.z } : { x:mouseGround.x, z:mouseGround.z });
+  }
   for (let i=0;i<pts.length;i++){
-    const post = cyl(0.5, 0.6, 3.4, new THREE.MeshLambertMaterial({ color:0xd9a44a, transparent:true, opacity:0.85 }), pts[i].x, 1.7, pts[i].z, 6);
+    const isCursor = (i === pts.length-1);
+    const joined = (i === 0 && startAttach) || (isCursor && cursorSnapped);
+    const post = cyl(0.5, 0.6, 3.4, new THREE.MeshLambertMaterial({ color: joined ? 0x7ac36a : 0xd9a44a, transparent:true, opacity:0.85 }), pts[i].x, 1.7, pts[i].z, 6);
     wallPreview.add(post);
     if (i>0) {
       const a = pts[i-1], b = pts[i];
@@ -480,25 +667,17 @@ function redrawWallPreview() {
 }
 
 function tryCloseWall() {
+  if (startAttach) { msg('This wall is joined — end it on the same wall to enclose a ward.', 'warn'); return; }
   if (wallDraft.length < 3) { msg('A ring needs at least 3 corners.', 'warn'); return; }
   const cost = wallDraftCost();
   if (state.stone < cost) { msg(`Not enough stone — the ring costs 🪨${cost}.`, 'warn'); return; }
-  // refuse rings that slice through buildings
-  const n = wallDraft.length;
-  for (const b of state.buildings) {
-    const def = BUILD_DEFS[b.type];
-    for (let i=0;i<n;i++){
-      const a = wallDraft[i], c = wallDraft[(i+1)%n];
-      if (distToSeg(b.x, b.z, a.x, a.z, c.x, c.z) < Math.max(def.w, def.d)/2 + 1.0) {
-        msg(`The wall would cut through a ${def.nm.toLowerCase()}. Route it around.`, 'warn');
-        return;
-      }
-    }
-  }
+  const hit = wallSegsCrossBuilding(wallDraft, true);
+  if (hit) { msg(`The wall would cut through a ${hit.nm.toLowerCase()}. Route it around.`, 'warn'); return; }
   state.stone -= cost;
-  const { group, gateSeg } = buildWallMeshes(wallDraft);
+  const verts = wallDraft.map(v => ({x:v.x, z:v.z}));
+  const { group, gates } = buildWallMeshes(verts, true);
   scene.add(group);
-  state.walls.push({ verts: wallDraft.map(v => ({x:v.x, z:v.z})), group, gateSeg });
+  state.walls.push({ poly: verts, path: verts, closed: true, group, gates });
   refreshDepths();
   const inside = state.buildings.filter(b => b.depth > 0 && !b.ruined).length;
   msg(`Ring closed — 🪨${cost}. ${inside} building${inside===1?'':'s'} now behind walls.`, 'good');
@@ -510,7 +689,7 @@ function tryCloseWall() {
 }
 
 function setTool(t) {
-  if (tool === 'wall' && t !== 'wall') { wallDraft = []; redrawWallPreview(); }
+  if (tool === 'wall' && t !== 'wall') { wallDraft = []; startAttach = null; redrawWallPreview(); }
   tool = (tool === t) ? null : t;
   if (ghost) { scene.remove(ghost); ghost = null; }
   if (tool && BUILD_DEFS[tool]) {
@@ -546,6 +725,7 @@ function costStr(cost) {
     const el = document.createElement('div');
     el.className = 'tool'; el.dataset.t = t;
     if (t === 'wall') el.innerHTML = `<div class="ico">🧱</div><div class="nm">Wall</div><div class="cost">🪨${WALL_COST_PER_UNIT}/step</div>`;
+    else if (t === 'gate') el.innerHTML = `<div class="ico">🚪</div><div class="nm">Gate</div><div class="cost">🪨${GATE_COST}</div>`;
     else if (t === 'demolish') el.innerHTML = `<div class="ico">🔨</div><div class="nm">Demolish</div><div class="cost">refund ½</div>`;
     else {
       const d = BUILD_DEFS[t];
@@ -646,7 +826,7 @@ function spawnRaid() {
   for (let i=0;i<size;i++){
     const ox = e.x !== 0 ? e.x * (MAP+18) : (Math.random()-0.5)*140;
     const oz = e.z !== 0 ? e.z * (MAP+18) : (Math.random()-0.5)*140;
-    const grp = makeFigure(0x7a2d20);
+    const grp = makeFigure(0x5c2a20, 'bandit');
     grp.position.set(ox + (Math.random()-0.5)*6, 0, oz + (Math.random()-0.5)*6);
     scene.add(grp);
     state.bandits.push({
@@ -666,7 +846,6 @@ function nearestEdgeExit(x, z) {
 
 function banditTick(bd, dt) {
   bd.bob += dt*10;
-  bd.grp.position.y = Math.abs(Math.sin(bd.bob))*0.12;
   if (bd.state === 'flee') {
     if (!bd.exit) bd.exit = nearestEdgeExit(bd.x, bd.z);
     moveToward(bd, bd.exit.x, bd.exit.z, dt);
@@ -689,7 +868,7 @@ function banditTick(bd, dt) {
       if (bd.state !== 'loiterAtWall') {
         bd.state = 'loiterAtWall'; bd.loiter = 5 + Math.random()*3;
         let vx = 0, vz = 0, best = 1e9;
-        for (const w of state.walls) for (const v of w.verts) {
+        for (const w of state.walls) for (const v of w.path) {
           const d = Math.hypot(v.x-bd.x, v.z-bd.z);
           if (d < best) { best = d; vx = v.x; vz = v.z; }
         }
@@ -724,6 +903,7 @@ function banditTick(bd, dt) {
 function moveToward(a, tx, tz, dt) {
   const d = Math.hypot(tx-a.x, tz-a.z);
   if (d < 0.01) return;
+  a._moved = true;
   a.x += (tx-a.x)/d * a.speed * dt;
   a.z += (tz-a.z)/d * a.speed * dt;
   a.grp.position.x = a.x; a.grp.position.z = a.z;
@@ -752,7 +932,7 @@ function destroyBuilding(b, byBandit=null) {
 }
 
 function spawnGuard(bk) {
-  const grp = makeFigure(0x3a5a8c);
+  const grp = makeFigure(0x3a5a8c, 'guard');
   grp.position.set(bk.x + 2, 0, bk.z + 2);
   scene.add(grp);
   const g = { x:bk.x+2, z:bk.z+2, hp:60, dps:12, speed:7, home:bk, patrol:null, grp, bob:Math.random()*6 };
@@ -769,7 +949,6 @@ function guardTick(g, dt) {
     return;
   }
   g.bob += dt*10;
-  g.grp.position.y = Math.abs(Math.sin(g.bob))*0.12;
   // find bandit near home
   let foe = null, best = 32;
   for (const bd of state.bandits) {
@@ -830,7 +1009,7 @@ function villagerTick(dt) {
   const homes = state.buildings.filter(b => !b.ruined && (b.type==='house' || b.type==='keep'));
   while (state.villagers.length < want && homes.length) {
     const h = homes[Math.random()*homes.length|0];
-    const grp = makeFigure([0x8c6a3a, 0x5a7a4a, 0x7a5a7a, 0x9c8248][Math.random()*4|0]);
+    const grp = makeFigure([0x8c6a3a, 0x5a7a4a, 0x7a5a7a, 0x9c8248][Math.random()*4|0], 'villager');
     grp.scale.setScalar(0.8);
     grp.position.set(h.x+1.5, 0, h.z+1.5);
     scene.add(grp);
@@ -843,7 +1022,6 @@ function villagerTick(dt) {
   for (const v of state.villagers) {
     if (v.home.ruined) { v.home = homes.length ? homes[0] : v.home; }
     v.bob += dt*8;
-    v.grp.position.y = Math.abs(Math.sin(v.bob))*0.08;
     if (v.wait > 0) { v.wait -= dt; continue; }
     if (!v.tgt || Math.hypot(v.tgt.x-v.x, v.tgt.z-v.z) < 0.5) {
       v.tgt = { x:v.home.x + (Math.random()-0.5)*10, z:v.home.z + (Math.random()-0.5)*10 };
@@ -858,11 +1036,11 @@ const keys = {};
 addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'Escape') {
-    if (tool === 'wall' && wallDraft.length) { wallDraft = []; redrawWallPreview(); }
+    if (tool === 'wall' && wallDraft.length) { wallDraft = []; startAttach = null; redrawWallPreview(); }
     else setTool(null);
   }
   if (e.code === 'Enter' && tool === 'wall') tryCloseWall();
-  const idx = ['Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit7','Digit8','Digit9'].indexOf(e.code);
+  const idx = ['Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit7','Digit8','Digit9','Digit0'].indexOf(e.code);
   if (idx >= 0 && idx < TOOL_ORDER.length) setTool(TOOL_ORDER[idx]);
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
@@ -913,12 +1091,24 @@ function snap(v) { return Math.round(v); }
 function handleClick() {
   if (!state.started || state.over) return;
   if (tool === 'wall') {
-    const x = snap(mouseGround.x), z = snap(mouseGround.z);
-    if (Math.abs(x) > MAP || Math.abs(z) > MAP) return;
-    if (wallDraft.length >= 3 && Math.hypot(x-wallDraft[0].x, z-wallDraft[0].z) < 3.5) { tryCloseWall(); return; }
-    if (wallDraft.length && Math.hypot(x-wallDraft[wallDraft.length-1].x, z-wallDraft[wallDraft.length-1].z) < 2) return;
-    wallDraft.push({ x, z });
-    redrawWallPreview();
+    wallClickAt(mouseGround.x, mouseGround.z);
+    return;
+  }
+  if (tool === 'gate') {
+    const sp = wallSnap(mouseGround.x, mouseGround.z);
+    if (!sp) { msg('Click on a wall to cut a gate into it.', 'warn'); return; }
+    const w = sp.wall, n = w.path.length;
+    const a = w.path[sp.seg], b = w.path[(sp.seg+1)%n];
+    const len = Math.hypot(b.x-a.x, b.z-a.z);
+    if (len <= GATE_W + 2) { msg('That stretch of wall is too short for a gate.', 'warn'); return; }
+    const tooClose = w.gates.some(g => g.seg === sp.seg && Math.abs(g.t - sp.t) * len < GATE_W + 2);
+    if (tooClose) { msg('There is already a gate there.', 'warn'); return; }
+    if (state.stone < GATE_COST) { msg(`A gate costs 🪨${GATE_COST}.`, 'warn'); return; }
+    state.stone -= GATE_COST;
+    w.gates.push({ seg: sp.seg, t: sp.t });
+    rebuildWall(w);
+    msg('Gate cut through the wall.', 'good');
+    saveGame();
     return;
   }
   if (tool === 'demolish') {
@@ -969,7 +1159,7 @@ function saveGame() {
       gold:state.gold, wood:state.wood, stone:state.stone, food:state.food,
       pop:state.pop, time:state.time, raidNum:state.raidNum,
       buildings: state.buildings.map(b => ({ type:b.type, x:b.x, z:b.z, hp:b.hp, ruined:b.ruined })),
-      walls: state.walls.map(w => ({ verts:w.verts })),
+      walls: state.walls.map(w => ({ poly:w.poly, path:w.path, closed:w.closed, gates:w.gates })),
     }));
   } catch (e) {}
 }
@@ -980,9 +1170,11 @@ function loadGame() {
   Object.assign(state, { gold:s.gold, wood:s.wood, stone:s.stone, food:s.food, pop:s.pop, time:s.time, raidNum:s.raidNum||0 });
   state.day = Math.floor(s.time / DAY) + 1;
   for (const w of s.walls) {
-    const { group, gateSeg } = buildWallMeshes(w.verts);
+    const path = w.path || w.verts, poly = w.poly || w.verts;   // legacy saves used {verts}
+    const closed = w.closed !== undefined ? w.closed : true;
+    const { group, gates } = buildWallMeshes(path, closed, w.gates || null);
     scene.add(group);
-    state.walls.push({ verts:w.verts, group, gateSeg });
+    state.walls.push({ poly, path, closed, group, gates });
   }
   for (const b of s.buildings) {
     const nb = placeBuilding(b.type, b.x, b.z, true);
@@ -1037,6 +1229,11 @@ function step(dt) {
   }
   for (const a of [...state.arrows]) arrowTick(a, dt);
   villagerTick(dt);
+  // walk-cycle pass: reads the _moved flags the ticks above just set
+  for (const a of [...state.bandits, ...state.guards, ...state.villagers]) {
+    animateFigure(a, dt);
+    a._moved = false;
+  }
 }
 
 function frame(dt) {
@@ -1064,10 +1261,19 @@ function frame(dt) {
       hintEl.style.top = (mousePx.y + 12) + 'px';
       const cost = wallDraftCost();
       const afford = state.stone >= cost;
-      hintEl.innerHTML = `Ring cost: <span class="${afford?'safe':'unsafe'}">🪨${cost}</span>` +
+      hintEl.innerHTML = `${startAttach ? 'Wall' : 'Ring'} cost: <span class="${afford?'safe':'unsafe'}">🪨${cost}</span>` +
         `\n${wallDraft.length} corner${wallDraft.length===1?'':'s'} — ` +
-        (wallDraft.length >= 3 ? 'click the first post or press Enter to close' : 'click to add corners');
+        (startAttach ? 'end on the same wall to enclose a ward'
+          : (wallDraft.length >= 3 ? 'click the first post or press Enter to close' : 'click to add corners'));
     } else hintEl.style.display = 'none';
+  } else if (tool === 'gate') {
+    const sp = wallSnap(mouseGround.x, mouseGround.z);
+    hintEl.style.display = 'block';
+    hintEl.style.left = (mousePx.x + 16) + 'px';
+    hintEl.style.top = (mousePx.y + 12) + 'px';
+    hintEl.innerHTML = sp
+      ? `<span class="safe">🚪 Cut a gate here — 🪨${GATE_COST}</span>`
+      : `Click a wall to cut a gate (🪨${GATE_COST})`;
   } else if (ghost && tool) {
     const x = snap(mouseGround.x), z = snap(mouseGround.z);
     ghost.position.set(x, 0, z);
@@ -1129,7 +1335,8 @@ $('startbtn').onclick = () => {
 window.BULWARK = {
   state, step,
   place: (t,x,z) => placeBuilding(t,x,z),
-  wall: (verts) => { wallDraft = verts.map(v=>({x:v[0],z:v[1]})); tryCloseWall(); },
+  wall: (verts) => { wallDraft = verts.map(v=>({x:v[0],z:v[1]})); startAttach = null; tryCloseWall(); },
+  clickWall: (x,z) => { const prev = tool; tool = 'wall'; wallClickAt(x, z); tool = prev; },
   start: () => { $('intro').style.display='none'; state.started = true; if (!state.buildings.length) newTownSetup(); },
   sim: (seconds, dt=0.1) => { for (let t=0;t<seconds;t+=dt) step(dt); return { ...state, buildings:state.buildings.length, walls:state.walls.length, bandits:state.bandits.length }; },
 };

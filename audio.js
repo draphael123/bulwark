@@ -131,8 +131,19 @@ function sfxCoin() {
   });
 }
 
+function sfxBell() {
+  for (const del of [0, 0.5, 1.0]) {
+    const t = ctx.currentTime + del;
+    for (const [fr, amp] of [[660, 0.28], [990, 0.14], [1571, 0.06]]) {
+      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = fr * (1 + (Math.random()-0.5)*0.004);
+      const g = ctx.createGain(); env(g, t, 0.003, amp, 0.9);
+      o.connect(g).connect(sfxBus); o.start(t); o.stop(t+1);
+    }
+  }
+}
+
 const PATCHES = { thunk:sfxThunk, stone:sfxStone, creak:sfxCreak, horn:sfxHorn,
-  chime:sfxChime, crash:sfxCrash, fall:sfxFall, click:sfxClick, coin:sfxCoin };
+  chime:sfxChime, crash:sfxCrash, fall:sfxFall, click:sfxClick, coin:sfxCoin, bell:sfxBell };
 
 // ---------------------------------------------------------------- ambience
 function startAmbience() {

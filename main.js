@@ -13,6 +13,8 @@ const GATE_W = 6;
 
 const BUILD_DEFS = {
   house:      { nm:'House',      ico:'🏠', w:3,  d:3,  hp:60,  cost:{wood:20},            popCap:4, needsWard:true },
+  townhouse:  { nm:'Townhouse',  ico:'🏘️', w:3,  d:3,  hp:90,  cost:{},                   popCap:8, needsWard:true },  // upgrade only
+  well:       { nm:'Well',       ico:'⛲', w:2,  d:2,  hp:60,  cost:{wood:10, stone:15},  coverR:14, needsWard:true },
   farm:       { nm:'Farm',       ico:'🌾', w:6,  d:6,  hp:50,  cost:{wood:30},            foodPerDay:12 },
   woodcutter: { nm:'Woodcutter', ico:'🪵', w:3,  d:3,  hp:50,  cost:{wood:10, gold:10},   woodPerDay:8, needsTrees:2 },
   quarry:     { nm:'Quarry',     ico:'⛏️', w:4,  d:4,  hp:80,  cost:{wood:25, gold:15},   stonePerDay:8, needsRocks:2 },
@@ -21,8 +23,9 @@ const BUILD_DEFS = {
   barracks:   { nm:'Barracks',   ico:'⚔️', w:4,  d:4,  hp:120, cost:{wood:40, stone:30, gold:50}, guards:3 },
   keep:       { nm:'Keep',       ico:'🏰', w:6,  d:6,  hp:400, cost:{},                   popCap:8 },
 };
-// walls first, then the town: the toolbar teaches the build order
-const TOOL_ORDER = ['wall','gate','house','farm','woodcutter','quarry','market','tower','barracks','demolish'];
+// walls first, then the town: the toolbar teaches the build order.
+// digits 1-9,0 map to the first ten tools; demolish lives on X
+const TOOL_ORDER = ['wall','gate','house','well','farm','woodcutter','quarry','market','tower','barracks','demolish'];
 const GATE_COST = 10; // stone, for the Gate tool
 
 // ---------------------------------------------------------------- state
@@ -30,8 +33,9 @@ const state = {
   gold:100, wood:120, stone:140, food:60,
   pop:6, time:0, day:1,
   buildings:[],       // {type,x,z,hp,maxHp,depth,ruined,group,hitFlash}
-  walls:[],           // {verts:[{x,z}], group, gateSeg}
-  bandits:[], guards:[], arrows:[], villagers:[],
+  walls:[],           // {poly, path, closed, gates, group}
+  bandits:[], guards:[], arrows:[], villagers:[], caravans:[],
+  fireCool:150, caravanT:45, upgCool:0,
   raidTimer:150, raidEdge:null, raidNum:0,
   over:false, started:false,
 };
@@ -405,6 +409,27 @@ function buildMesh(type) {
       win.position.set(ry ? wz : wx, 1.15, ry ? wx : wz);
       win.rotation.y = ry; g.add(win);
     }
+  } else if (type === 'townhouse') {
+    // jettied two-story townhouse — the dense-ward upgrade
+    g.add(box(2.6, 2.0, 2.6, MAT.plaster, 0, 1.0, 0));
+    g.add(box(2.9, 1.7, 2.9, MAT.timber, 0, 2.85, 0));
+    g.add(box(2.7, 1.5, 2.7, MAT.plaster, 0, 2.85, 0));
+    const roof = new THREE.Mesh(prismGeo(3.3, 1.6, 3.3), MAT.roof);
+    roof.position.y = 3.7; roof.castShadow = true; g.add(roof);
+    g.add(box(0.5, 1.2, 0.5, MAT.stoneD, 0.9, 4.6, 0.6));
+    for (const yy of [1.15, 3.0]) {
+      for (const wx of [-0.7, 0.7]) {
+        const win = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.52), MAT.window);
+        win.position.set(wx, yy, yy > 2 ? 1.47 : 1.32);
+        g.add(win);
+      }
+    }
+  } else if (type === 'well') {
+    g.add(cyl(0.95, 1.05, 0.8, MAT.stoneD, 0, 0.4, 0, 8));
+    g.add(cyl(0.75, 0.75, 0.85, new THREE.MeshLambertMaterial({ color:0x2d4a5e }), 0, 0.42, 0, 8));
+    for (const s of [-1, 1]) g.add(box(0.14, 1.5, 0.14, MAT.timber, s*0.8, 0.75, 0));
+    const r = new THREE.Mesh(prismGeo(2.0, 0.7, 1.2), MAT.roofB); r.position.y = 1.5; r.castShadow = true; g.add(r);
+    g.add(box(0.3, 0.3, 0.3, MAT.timber, 0, 1.0, 0));
   } else if (type === 'farm') {
     g.add(box(5.6, 0.25, 5.6, MAT.soil, 0, 0.12, 0));
     for (let i=0;i<4;i++) g.add(box(5.0, 0.35, 0.7, MAT.crop, 0, 0.4, -2.1+i*1.4));
@@ -604,6 +629,28 @@ function animateFigure(a, dt) {
   a.grp.position.y = (a.baseY || 0) + Math.abs(Math.sin(a.bob)) * 0.06 * a._swing;
 }
 
+// merchant caravan: horse + covered cart
+function makeCaravan() {
+  const g = new THREE.Group();
+  const mat = c => new THREE.MeshLambertMaterial({ color:c });
+  // cart
+  g.add(box(1.4, 0.5, 2.2, MAT.timber, 0, 0.75, -0.6));
+  const canopy = new THREE.Mesh(prismGeo(1.6, 0.8, 2.0), mat(0xd9cfb8));
+  canopy.position.set(0, 1.0, -0.6); canopy.castShadow = true; g.add(canopy);
+  for (const [sx, sz] of [[-0.75, -1.2], [0.75, -1.2], [-0.75, 0.1], [0.75, 0.1]]) {
+    const wh = cyl(0.35, 0.35, 0.12, MAT.timber, sx, 0.35, sz, 8);
+    wh.rotation.z = Math.PI/2; g.add(wh);
+  }
+  // horse
+  const horse = mat(0x6b4a30);
+  g.add(box(0.55, 0.6, 1.2, horse, 0, 0.85, 1.3));
+  g.add(box(0.3, 0.5, 0.45, horse, 0, 1.35, 1.9));
+  for (const [sx, sz] of [[-0.18, 0.85], [0.18, 0.85], [-0.18, 1.75], [0.18, 1.75]])
+    g.add(box(0.12, 0.55, 0.12, horse, sx, 0.28, sz));
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+
 // wall sentries — ceremonial watchmen pacing the wall tops (visual only)
 function sentryTick(dt) {
   for (const w of state.walls) {
@@ -756,6 +803,7 @@ function gateTick(dt) {
       let want = false;
       for (const v of state.villagers) if (Math.hypot(v.x-p.x, v.z-p.z) < 5) { want = true; break; }
       if (!want) for (const gd of state.guards) if (Math.hypot(gd.x-p.x, gd.z-p.z) < 5) { want = true; break; }
+      if (!want) for (const cv of state.caravans) if (Math.hypot(cv.x-p.x, cv.z-p.z) < 6) { want = true; break; }
       const prev = g.openT || 0;
       const target = want ? 1 : 0;
       g.openT = Math.max(0, Math.min(1, prev + Math.sign(target - prev) * dt * 1.7));
@@ -1238,7 +1286,7 @@ function costStr(cost) {
 {
   const TOOL_GROUPS = [
     { nm:'WALLS',    tools:['wall','gate'] },
-    { nm:'TOWN',     tools:['house','market'] },
+    { nm:'TOWN',     tools:['house','well','market'] },
     { nm:'INDUSTRY', tools:['farm','woodcutter','quarry'] },
     { nm:'DEFENSE',  tools:['tower','barracks'] },
     { nm:'',         tools:['demolish'] },
@@ -1253,7 +1301,8 @@ function costStr(cost) {
     for (const t of grp.tools) {
       const el = document.createElement('div');
       el.className = 'tool'; el.dataset.t = t;
-      const key = TOOL_ORDER.indexOf(t) === 9 ? 0 : TOOL_ORDER.indexOf(t)+1;
+      const ki = TOOL_ORDER.indexOf(t);
+      const key = t === 'demolish' ? 'X' : (ki === 9 ? 0 : ki+1);
       if (t === 'wall') el.innerHTML = `<div class="ico">🧱</div><div class="nm">Wall</div><div class="cost">🪨${WALL_COST_PER_UNIT}/step</div>`;
       else if (t === 'gate') el.innerHTML = `<div class="ico">🚪</div><div class="nm">Gate</div><div class="cost">🪨${GATE_COST}</div>`;
       else if (t === 'demolish') el.innerHTML = `<div class="ico">🔨</div><div class="nm">Demolish</div><div class="cost">refund ½</div>`;
@@ -1308,6 +1357,142 @@ function foodRate() { // per day
   for (const b of state.buildings) if (!b.ruined && b.type === 'farm') r += BUILD_DEFS.farm.foodPerDay;
   return r - state.pop * 0.5;
 }
+function coveredBy(b, type, r) {
+  return state.buildings.some(o => !o.ruined && o.type === type && Math.hypot(o.x-b.x, o.z-b.z) <= r);
+}
+
+// houses in well-planned wards grow into townhouses — density is the reward
+function upgradeTick(dt) {
+  state.upgCool -= dt;
+  for (const b of state.buildings) {
+    if (b.ruined || b.type !== 'house' || b.depth < 1) continue;
+    const ready = coveredBy(b, 'well', BUILD_DEFS.well.coverR)
+               && coveredBy(b, 'market', BUILD_DEFS.market.boostR)
+               && state.pop >= popCap() * 0.85;
+    if (!ready) { b.upT = 0; continue; }
+    b.upT = (b.upT || 0) + dt;
+    if (b.upT > 25 && state.upgCool <= 0) {
+      state.upgCool = 12;
+      scene.remove(b.group);
+      b.type = 'townhouse';
+      b.hp = b.maxHp = BUILD_DEFS.townhouse.hp;
+      b.group = buildMesh('townhouse');
+      b.group.position.set(b.x, 0, b.z);
+      b.group.traverse(o => { o.userData.b = b; });
+      scene.add(b.group);
+      b.buildT = 0;
+      dustBurst(b.x, b.z, 2, 10);
+      AudioSys.play('thunk');
+      msg('A house grows into a townhouse — twice the folk, twice the rent.', 'good');
+      saveGame();
+    }
+  }
+}
+
+// fire — the price of density. Starts only after the charter is fulfilled.
+const FLAMMABLE = { house:1, townhouse:1.6, market:1, woodcutter:1.4, barracks:1 };
+function igniteBuilding(b) {
+  if (b.ruined || b.onFire) return;
+  b.onFire = true; b.fireT = 0; b._spread = false;
+  msg('🔥 Fire has broken out in the ward!', 'warn');
+  AudioSys.play('bell');
+}
+function fireTick(dt) {
+  if (!objAllDoneAt) return;   // no fires while learning
+  state.fireCool -= dt;
+  if (state.fireCool <= 0) {
+    for (const b of state.buildings) {
+      if (b.ruined || b.onFire || b.depth < 1 || !FLAMMABLE[b.type]) continue;
+      const perSec = 0.0006 * FLAMMABLE[b.type] * (coveredBy(b, 'well', BUILD_DEFS.well.coverR) ? 0.3 : 1);
+      if (Math.random() < perSec * dt) {
+        igniteBuilding(b);
+        state.fireCool = 140 + Math.random()*80;
+        break;
+      }
+    }
+  }
+  for (const b of state.buildings) {
+    if (!b.onFire || b.ruined) continue;
+    const welled = coveredBy(b, 'well', BUILD_DEFS.well.coverR);
+    b.fireT += dt;
+    b.burnT = 0.5;   // feeds the flame/smoke particles
+    b.hp -= (welled ? 2 : 3.5) * dt;
+    if (!b._spread && b.fireT > 8) {
+      b._spread = true;
+      for (const o of state.buildings) {
+        if (o === b || o.ruined || o.onFire || !FLAMMABLE[o.type]) continue;
+        if (Math.hypot(o.x-b.x, o.z-b.z) > 7) continue;
+        const resist = coveredBy(o, 'well', BUILD_DEFS.well.coverR) ? 0.15 : 0.45;
+        if (Math.random() < resist) igniteBuilding(o);
+      }
+    }
+    if (welled && b.fireT > 7) {
+      b.onFire = false;
+      msg('The well brigade douses the flames.', 'good');
+    } else if (b.hp <= 0) {
+      b.onFire = false;
+      destroyBuilding(b);
+      msg('A building burns to the ground. Wells slow the flames — space is a firebreak.', 'warn');
+    }
+  }
+}
+
+// merchant caravans — gates as arteries of trade
+function caravanTick(dt) {
+  const markets = state.buildings.filter(b => !b.ruined && b.type === 'market' && b.depth > 0);
+  const gatesAll = [];
+  for (const w of state.walls) for (const g of (w.gates||[])) { const p = gateWorld(w, g); if (p) gatesAll.push(p); }
+  if (markets.length && gatesAll.length && !state.bandits.length && state.caravans.length < 2) {
+    state.caravanT -= dt;
+    if (state.caravanT <= 0) {
+      state.caravanT = 55 + Math.random()*45;
+      const e = EDGES[Math.random()*4|0];
+      const sx = e.x !== 0 ? e.x*(MAP+16) : (Math.random()-0.5)*120;
+      const sz = e.z !== 0 ? e.z*(MAP+16) : (Math.random()-0.5)*120;
+      const m = markets[Math.random()*markets.length|0];
+      gatesAll.sort((a,b2) => Math.hypot(a.x-m.x,a.z-m.z) - Math.hypot(b2.x-m.x,b2.z-m.z));
+      const gate = gatesAll[0];
+      const grp = makeCaravan();
+      grp.position.set(sx, 0, sz);
+      scene.add(grp);
+      state.caravans.push({ x:sx, z:sz, speed:4.5, grp, bob:Math.random()*6,
+        wps:[{x:gate.x, z:gate.z}, {x:m.x+3.5, z:m.z+3.5}], i:0, phase:'in', tradeT:4,
+        exit:{x:sx, z:sz}, gate:{x:gate.x, z:gate.z} });
+    }
+  }
+  for (const c of [...state.caravans]) {
+    c.bob += dt*6;
+    c.grp.rotation.z = Math.sin(c.bob)*0.02;
+    if (state.bandits.length && c.phase !== 'flee') { c.phase = 'flee'; c.speed = 7; c.wps = [c.exit]; c.i = 0; }
+    if (c.phase === 'trade') {
+      c.tradeT -= dt;
+      if (c.tradeT <= 0) {
+        const take = 10 + markets.length*4 + Math.min(20, Math.floor(state.pop/3));
+        state.gold += take;
+        AudioSys.play('coin');
+        if (Math.random() < 0.4) msg(`A caravan trades at the market — 🪙${take}.`, 'good');
+        c.phase = 'out';
+        c.wps = [c.gate, c.exit]; c.i = 0;
+      }
+      continue;
+    }
+    const wp = c.wps[c.i];
+    if (!wp) { scene.remove(c.grp); state.caravans.splice(state.caravans.indexOf(c),1); continue; }
+    if (Math.hypot(wp.x-c.x, wp.z-c.z) < 1.6) {
+      c.i++;
+      if (c.i >= c.wps.length) {
+        if (c.phase === 'in') c.phase = 'trade';
+        else { scene.remove(c.grp); state.caravans.splice(state.caravans.indexOf(c),1); }
+      }
+      continue;
+    }
+    moveToward(c, wp.x, wp.z, dt);
+    if (c.phase !== 'in' && (Math.abs(c.x) > MAP+15 || Math.abs(c.z) > MAP+15)) {
+      scene.remove(c.grp); state.caravans.splice(state.caravans.indexOf(c),1);
+    }
+  }
+}
+
 let growthT = 0;
 function economyTick(dt) {
   const perDay = dt / DAY;
@@ -1319,10 +1504,11 @@ function economyTick(dt) {
     if (b.type === 'farm') state.food += BUILD_DEFS.farm.foodPerDay * perDay;
     else if (b.type === 'woodcutter') state.wood += BUILD_DEFS.woodcutter.woodPerDay * perDay;
     else if (b.type === 'quarry') state.stone += BUILD_DEFS.quarry.stonePerDay * perDay;
-    else if (b.type === 'house' || b.type === 'keep') {
+    else if (b.type === 'house' || b.type === 'townhouse' || b.type === 'keep') {
       const occupants = BUILD_DEFS[b.type].popCap * Math.min(1, state.pop / Math.max(1, popCap()));
       let rate = b.depth >= 1 ? 2 * (1 + 0.25 * (b.depth - 1)) : 0.8;   // deep wards pay more; outside pays little
-      if (markets.some(m => Math.hypot(m.x-b.x, m.z-b.z) <= BUILD_DEFS.market.boostR)) rate *= 1.3;
+      if (coveredBy(b, 'market', BUILD_DEFS.market.boostR)) rate *= 1.3;
+      if (coveredBy(b, 'well', BUILD_DEFS.well.coverR)) rate *= 1.15;
       tax += occupants * rate;
       if (b.depth >= 1) housesInside.push(b);
     }
@@ -1646,6 +1832,7 @@ addEventListener('keydown', e => {
   if (e.code === 'Enter' && tool === 'wall') tryCloseWall();
   const idx = ['Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit7','Digit8','Digit9','Digit0'].indexOf(e.code);
   if (idx >= 0 && idx < TOOL_ORDER.length) setTool(TOOL_ORDER[idx]);
+  if (e.code === 'KeyX') setTool('demolish');
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 
@@ -1824,6 +2011,9 @@ function step(dt) {
   villagerTick(dt);
   sentryTick(dt);
   gateTick(dt);
+  upgradeTick(dt);
+  fireTick(dt);
+  caravanTick(dt);
   // walk-cycle pass: reads the _moved flags the ticks above just set
   const figures = [...state.bandits, ...state.guards, ...state.villagers];
   for (const w of state.walls) if (w.sentries) figures.push(...w.sentries);
@@ -1898,11 +2088,17 @@ function frame(dt) {
       hintEl.style.display = 'block';
       hintEl.style.left = (mousePx.x + 16) + 'px';
       hintEl.style.top = (mousePx.y + 12) + 'px';
-      let html = `${def.ico} ${def.nm}${b.ruined ? ' — ruin (Demolish to clear)' : ''}`;
-      if (!b.ruined && (b.type === 'house' || b.type === 'keep')) {
+      let html = `${def.ico} ${def.nm}${b.ruined ? ' — ruin (Demolish to clear)' : ''}${b.onFire ? ' — 🔥 ON FIRE' : ''}`;
+      if (!b.ruined && (b.type === 'house' || b.type === 'townhouse' || b.type === 'keep')) {
         const occ = Math.round(def.popCap * Math.min(1, state.pop / Math.max(1, popCap())));
-        const rate = b.depth >= 1 ? 2 * (1 + 0.25 * (b.depth - 1)) : 0.8;
+        let rate = b.depth >= 1 ? 2 * (1 + 0.25 * (b.depth - 1)) : 0.8;
+        const hasWell = coveredBy(b, 'well', BUILD_DEFS.well.coverR);
+        const hasMkt = coveredBy(b, 'market', BUILD_DEFS.market.boostR);
+        if (hasMkt) rate *= 1.3;
+        if (hasWell) rate *= 1.15;
         html += `\n<span class="${b.depth ? 'safe' : 'unsafe'}">${b.depth ? `🛡 Ward ${['','I','II','III','IV','V'][Math.min(b.depth,5)]}` : '⚠ Outside walls'}</span> · ${occ} folk · 🪙${(occ*rate).toFixed(1)}/day`;
+        html += `\n<span class="${hasWell?'safe':'unsafe'}">⛲ ${hasWell?'well water':'no well'}</span> · <span class="${hasMkt?'safe':'unsafe'}">🏪 ${hasMkt?'market nearby':'no market'}</span>`;
+        if (b.type === 'house' && hasWell && hasMkt && b.depth >= 1) html += `\n<span class="safe">↑ will grow into a townhouse</span>`;
       }
       if (!b.ruined && b.hp < b.maxHp - 0.5) html += `\n${Math.round(b.hp)}/${b.maxHp} hp`;
       hintEl.innerHTML = html;

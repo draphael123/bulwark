@@ -33,10 +33,14 @@
   /* ---------- bottom build palette ---------- */
   #palette {
     position:fixed; left:50%; bottom:12px; transform:translateX(-50%);
-    display:flex; gap:6px; padding:8px 10px; z-index:10;
+    display:flex; gap:14px; padding:6px 12px 8px; z-index:10;
     background:linear-gradient(#241a0eee, #16100acc);
     border:1px solid #4a3a20; border-radius:10px; user-select:none;
   }
+  .toolgroup { display:flex; flex-direction:column; align-items:center; }
+  .toolgroup + .toolgroup { border-left:1px solid #3a2d18; padding-left:14px; }
+  .toolgroup .gname { font-size:9px; letter-spacing:2px; color:#8a7a58; margin:2px 0 3px; }
+  .toolgroup .grow { display:flex; gap:6px; }
   .tool {
     width:74px; padding:7px 4px 5px; text-align:center; cursor:pointer;
     border:1px solid #3a2d18; border-radius:7px; background:#1d150c;
@@ -104,6 +108,25 @@
     position:fixed; inset:0; pointer-events:none; z-index:8; opacity:0;
     box-shadow:inset 0 0 180px 40px #a3210066; transition:opacity .6s;
   }
+
+  /* ---------- founding charter (objectives) ---------- */
+  #objectives {
+    position:fixed; top:56px; left:14px; z-index:9; display:none;
+    background:#16100acc; border:1px solid #4a3a20; border-radius:8px;
+    padding:10px 16px 12px; font-size:13px; line-height:2.0; user-select:none;
+  }
+  #objectives h4 { font-size:11px; letter-spacing:3px; color:#d9a44a; margin-bottom:4px; }
+  #objectives .obj .tick { display:inline-block; width:20px; color:#8a7a58; }
+  #objectives .obj.done { color:#8faf68; opacity:.75; }
+  #objectives .obj.done .tick { color:#8faf68; }
+  #objectives .obj.done .lbl { text-decoration:line-through; }
+
+  /* ---------- raid direction arrow ---------- */
+  #raidarrow {
+    position:fixed; z-index:9; display:none; pointer-events:none;
+    font-size:30px; color:#ff5a3c; text-shadow:0 0 10px #a32100cc, 0 1px 3px #000;
+    animation:pulse 0.9s infinite;
+  }
 </style>
 </head>
 <body>
@@ -126,24 +149,23 @@
 <div id="palette"></div>
 <div id="log"></div>
 <div id="hint"></div>
+<div id="objectives"></div>
+<div id="raidarrow">➤</div>
 
 <div class="overlay" id="intro">
   <div class="panel">
     <h1>BULWARK</h1>
     <div class="tag">the wall is the town</div>
-    <p><b>Walls come first.</b> Draw a ring of stone; everything inside it is safe from
-       bandits and pays full taxes. Houses and markets can only be raised inside a ward —
-       the wall is the town. Rings within rings make richer wards: the deeper, the higher the rent.</p>
-    <p><b>But the land feeds the town.</b> Farms, woodcutters and quarries sprawl outside,
-       and raiders will burn whatever the walls don't hold. Guard the fields with towers
-       and barracks — or wall them in, if you can afford the stone.</p>
-    <p><b>Protect the Keep.</b> If it falls, the town falls.</p>
+    <p><b>The wall is the town.</b> Ring the Keep in stone — houses and markets can only
+       stand inside walls, and the deeper the ward, the richer the rent. Walls can join
+       other walls to enclose new wards, and gates are cut wherever you choose.</p>
+    <p><b>The land feeds you.</b> Farms and mills sprawl outside — and raiders burn
+       whatever the walls don't hold. If the Keep falls, the town falls.</p>
+    <p style="text-align:center; color:#d9a44a"><b>Follow the Founding Charter, top left.</b></p>
     <button id="startbtn">FOUND THE TOWN</button>
     <div class="keys">
-      <b>Mouse</b> — left: build / select · right-drag: rotate · wheel: zoom · middle-drag or WASD: pan<br>
-      <b>Wall tool</b> — click to lay vertices, click the first vertex (or Enter) to close the ring, Esc cancels<br>
-      <b>Joining walls</b> — start a wall ON an existing one (post turns green), add corners, end on the same wall: the enclosed pocket becomes a new ward<br>
-      <b>1–9</b> select tools · <b>Esc</b> cancel
+      <b>Mouse</b> — left: build · right-drag: rotate · wheel: zoom · middle-drag or WASD: pan<br>
+      <b>1–9, 0</b> select tools · <b>Esc</b> cancel — the tools themselves will teach you the rest
     </div>
   </div>
 </div>

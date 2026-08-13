@@ -42,6 +42,8 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -72,7 +74,43 @@ sun.shadow.camera.top = 140;   sun.shadow.camera.bottom = -140;
 sun.shadow.camera.far = 400;
 sun.shadow.bias = -0.0004;
 scene.add(sun);
-scene.add(new THREE.HemisphereLight(0xbdd3e8, 0x5a6b3a, 0.9));
+const hemi = new THREE.HemisphereLight(0xbdd3e8, 0x5a6b3a, 0.9);
+scene.add(hemi);
+
+// ------------------------------------------------- day/night atmosphere
+// keyframes over one day; f is the fraction of the current day (offset so a
+// new game opens mid-morning, and night stays short + readable)
+const ATMO = [
+  { t:0.00, sky:0x1d2842, sunI:0.30, sunC:0x8fa5d8, hemiI:0.35 },   // deep night
+  { t:0.06, sky:0xe8956a, sunI:1.30, sunC:0xffc07a, hemiI:0.60 },   // dawn
+  { t:0.18, sky:0x86a3c3, sunI:2.60, sunC:0xfff2d8, hemiI:0.90 },   // morning
+  { t:0.66, sky:0x86a3c3, sunI:2.60, sunC:0xfff2d8, hemiI:0.90 },   // afternoon
+  { t:0.78, sky:0xd9855a, sunI:1.35, sunC:0xffab66, hemiI:0.62 },   // dusk
+  { t:0.88, sky:0x1d2842, sunI:0.30, sunC:0x8fa5d8, hemiI:0.35 },   // nightfall
+  { t:1.00, sky:0x1d2842, sunI:0.30, sunC:0x8fa5d8, hemiI:0.35 },
+];
+const _atA = new THREE.Color(), _atB = new THREE.Color();
+let nightFactor = 0;
+function updateAtmosphere() {
+  // light sweeps once per THREE game days — day counter stays 60s, but the
+  // sky changes at a readable pace instead of strobing
+  const f = ((state.time / (DAY*3)) + 0.30) % 1;
+  let i = 0;
+  while (i < ATMO.length-2 && ATMO[i+1].t <= f) i++;
+  const a = ATMO[i], b = ATMO[i+1];
+  const u = Math.max(0, Math.min(1, (f - a.t) / Math.max(1e-6, b.t - a.t)));
+  const lerp = (p,q) => p + (q-p)*u;
+  _atA.setHex(a.sky).lerp(_atB.setHex(b.sky), u);
+  scene.background.copy(_atA);
+  scene.fog.color.copy(_atA);
+  sun.intensity = lerp(a.sunI, b.sunI);
+  sun.color.setHex(a.sunC).lerp(_atB.setHex(b.sunC), u);
+  hemi.intensity = lerp(a.hemiI, b.hemiI);
+  const ang = f * Math.PI * 2 - Math.PI/2;
+  sun.position.set(Math.cos(ang)*100, Math.max(35, Math.sin(ang)*130), 40);
+  nightFactor = Math.max(0, Math.min(1, 1 - (sun.intensity - 0.3) / 1.0));
+  MAT.window.opacity = nightFactor * 0.95;
+}
 
 // ground with baked high-frequency grass speckle
 function grassTexture() {
@@ -89,10 +127,26 @@ function grassTexture() {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(640, 640),
-  new THREE.MeshLambertMaterial({ map: grassTexture() })
-);
+// terrain: flat where you build, rolling hills toward the horizon
+function valueNoise2(x, z) {
+  const xi = Math.floor(x), zi = Math.floor(z);
+  const h = (a,b) => { const n = Math.sin(a*127.1 + b*311.7 + 74.7) * 43758.5453; return n - Math.floor(n); };
+  const u = x-xi, v = z-zi, s = t => t*t*(3-2*t);
+  const a = h(xi,zi), b = h(xi+1,zi), c = h(xi,zi+1), d = h(xi+1,zi+1);
+  return a + (b-a)*s(u) + (c-a)*s(v) + (a-b-c+d)*s(u)*s(v);
+}
+const groundGeo = new THREE.PlaneGeometry(640, 640, 96, 96);
+{
+  const pos = groundGeo.attributes.position;
+  for (let i=0;i<pos.count;i++){
+    const wx = pos.getX(i), wz = -pos.getY(i);          // plane local -> world (pre-rotation)
+    const dist = Math.max(Math.abs(wx), Math.abs(wz));
+    const m = THREE.MathUtils.smoothstep(dist, MAP+8, MAP+90);
+    pos.setZ(i, m * (valueNoise2(wx*0.02, wz*0.02) * 10 + valueNoise2(wx*0.06, wz*0.06) * 2.5));
+  }
+  groundGeo.computeVertexNormals();
+}
+const ground = new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({ map: grassTexture() }));
 ground.rotation.x = -Math.PI/2;
 ground.receiveShadow = true;
 scene.add(ground);
@@ -158,6 +212,34 @@ const trees = [], rocks = [];
     rocks.push({ x, z });
   }
   scene.add(rockI);
+
+  // grass tufts + wildflowers so the meadow reads as ground, not a green void
+  const col = new THREE.Color();
+  const tuftG = new THREE.ConeGeometry(0.24, 0.55, 4);
+  tuftG.translate(0, 0.27, 0);
+  const TN = 700;
+  const tuftI = new THREE.InstancedMesh(tuftG, new THREE.MeshLambertMaterial({ color:0xffffff }), TN);
+  for (let i=0;i<TN;i++){
+    const x = (srand()-0.5)*2*(MAP+25), z = (srand()-0.5)*2*(MAP+25);
+    const sc = 0.6 + srand()*0.9;
+    q.setFromEuler(new THREE.Euler((srand()-0.5)*0.3, srand()*Math.PI, (srand()-0.5)*0.3));
+    m4.compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(sc, sc, sc));
+    tuftI.setMatrixAt(i, m4);
+    tuftI.setColorAt(i, col.setHSL(0.24 + srand()*0.05, 0.42, 0.30 + srand()*0.10));
+  }
+  scene.add(tuftI);
+
+  const flwG = new THREE.SphereGeometry(0.10, 5, 4);
+  const FN = 150;
+  const flwI = new THREE.InstancedMesh(flwG, new THREE.MeshLambertMaterial({ color:0xffffff }), FN);
+  const flwCols = [0xfff1c9, 0xf2d24b, 0xd96a6a, 0xc9a3e8];
+  for (let i=0;i<FN;i++){
+    const x = (srand()-0.5)*2*(MAP+20), z = (srand()-0.5)*2*(MAP+20);
+    m4.compose(new THREE.Vector3(x, 0.18, z), q.identity(), new THREE.Vector3(1,1,1));
+    flwI.setMatrixAt(i, m4);
+    flwI.setColorAt(i, col.setHex(flwCols[(srand()*flwCols.length)|0]));
+  }
+  scene.add(flwI);
 }
 
 // ---------------------------------------------------------------- mesh builders
@@ -173,6 +255,9 @@ const MAT = {
   canopy:  new THREE.MeshLambertMaterial({ color:0xa23a3a }),
   banner:  new THREE.MeshLambertMaterial({ color:0xd9a44a }),
   ruin:    new THREE.MeshLambertMaterial({ color:0x3a352e }),
+  // shared window material — opacity driven by nightFactor so every window in
+  // town lights up together at dusk
+  window:  new THREE.MeshBasicMaterial({ color:0xffc966, transparent:true, opacity:0, depthWrite:false }),
 };
 
 // gabled roof prism: width x, height y, depth z (ridge along z).
@@ -207,6 +292,11 @@ function buildMesh(type) {
     const roof = new THREE.Mesh(prismGeo(3.1, 1.5, 3.1), MAT.roof);
     roof.position.y = 2.0; roof.castShadow = true; g.add(roof);
     g.add(box(0.5, 1.0, 0.5, MAT.stoneD, 0.9, 3.0, 0.6)); // chimney
+    for (const [wx, wz, ry] of [[-0.7, 1.36, 0], [0.7, 1.36, 0], [1.36, 0.4, Math.PI/2]]) {
+      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.55), MAT.window);
+      win.position.set(ry ? wz : wx, 1.15, ry ? wx : wz);
+      win.rotation.y = ry; g.add(win);
+    }
   } else if (type === 'farm') {
     g.add(box(5.6, 0.25, 5.6, MAT.soil, 0, 0.12, 0));
     for (let i=0;i<4;i++) g.add(box(5.0, 0.35, 0.7, MAT.crop, 0, 0.4, -2.1+i*1.4));
@@ -248,8 +338,70 @@ function buildMesh(type) {
     }
     g.add(cyl(0.08, 0.08, 3.0, MAT.timber, 0, 6.0, 0, 6));
     g.add(box(0.06, 1.0, 1.4, MAT.banner, 0, 7.0, 0.7));
+    for (const ry of [0, Math.PI/2, Math.PI, -Math.PI/2]) {
+      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.8), MAT.window);
+      win.position.set(Math.sin(ry)*2.32, 3.1, Math.cos(ry)*2.32);
+      win.rotation.y = ry; g.add(win);
+    }
   }
   return g;
+}
+
+// ---------------------------------------------------------------- particles
+// visual-only pool: sim code spawns, frame() advances — headless sim stays pure
+function softDiscTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const gr = g.createRadialGradient(32,32,2, 32,32,30);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0,0,64,64);
+  return new THREE.CanvasTexture(c);
+}
+const P_TEX = softDiscTexture();
+const particles = [], P_CAP = 160;
+function spawnP(x, y, z, opt) {
+  let p = particles.find(q => !q.alive);
+  if (!p) {
+    if (particles.length >= P_CAP) return;
+    p = { spr: new THREE.Sprite(new THREE.SpriteMaterial({ map:P_TEX, transparent:true, depthWrite:false })), alive:false };
+    scene.add(p.spr);
+    particles.push(p);
+  }
+  p.alive = true;
+  p.life = p.maxLife = opt.life || 1;
+  p.vx = opt.vx || 0; p.vy = opt.vy ?? 1.5; p.vz = opt.vz || 0;
+  p.grow = opt.grow ?? 0.8;
+  p._o = opt.opacity ?? 0.7;
+  p.spr.material.color.setHex(opt.color);
+  p.spr.material.opacity = p._o;
+  p.spr.position.set(x, y, z);
+  p.spr.scale.setScalar(opt.scale || 1);
+  p.spr.visible = true;
+}
+function updateParticles(dt) {
+  for (const p of particles) {
+    if (!p.alive) continue;
+    p.life -= dt;
+    if (p.life <= 0) { p.alive = false; p.spr.visible = false; continue; }
+    p.spr.position.x += p.vx*dt; p.spr.position.y += p.vy*dt; p.spr.position.z += p.vz*dt;
+    p.spr.scale.setScalar(p.spr.scale.x + p.grow*dt);
+    p.spr.material.opacity = p._o * (p.life / p.maxLife);
+  }
+}
+function dustBurst(x, z, r=2, n=9) {
+  for (let i=0;i<n;i++){
+    const a = Math.random()*Math.PI*2;
+    spawnP(x+Math.cos(a)*r*0.5, 0.3, z+Math.sin(a)*r*0.5,
+      { color:0xcbb794, life:0.6+Math.random()*0.4, vx:Math.cos(a)*2.4, vz:Math.sin(a)*2.4, vy:1.1+Math.random(), grow:1.8, scale:0.8, opacity:0.55 });
+  }
+}
+function smokePuff(x, y, z, big=false) {
+  spawnP(x+(Math.random()-0.5)*1.4, y, z+(Math.random()-0.5)*1.4,
+    { color:0x2e2a24, life:1.6+Math.random(), vy:1.5+Math.random(), grow: big?2.6:1.3, scale: big?1.6:0.9, opacity:0.5 });
+}
+function flamePuff(x, y, z) {
+  spawnP(x+(Math.random()-0.5)*1.1, y, z+(Math.random()-0.5)*1.1,
+    { color:0xff8a2a, life:0.45+Math.random()*0.3, vy:2.4, grow:0.3, scale:0.9, opacity:0.85 });
 }
 
 function makeRuin(b) {
@@ -262,10 +414,12 @@ function makeRuin(b) {
 }
 
 // agents — little articulated folk: legs/arms pivot at hip/shoulder for a walk cycle
+const SKIN_TONES = [0xdbb894, 0xc99b72, 0xa9764f, 0x8a5a3a];
 function makeFigure(bodyColor, role='villager') {
   const g = new THREE.Group();
   const mat = c => new THREE.MeshLambertMaterial({ color:c });
-  const bodyM = mat(bodyColor), skinM = mat(0xdbb894), darkM = mat(0x3a2d20);
+  const skin = SKIN_TONES[Math.random()*SKIN_TONES.length|0];
+  const bodyM = mat(bodyColor), skinM = mat(skin), darkM = mat(0x3a2d20);
 
   const legGeo = new THREE.BoxGeometry(0.16, 0.5, 0.2); legGeo.translate(0, -0.25, 0);
   const legL = new THREE.Mesh(legGeo, darkM); legL.position.set(-0.11, 0.5, 0);
@@ -286,8 +440,19 @@ function makeFigure(bodyColor, role='villager') {
   g.add(legL, legR, torso, belt, armL, armR, head);
 
   if (role === 'villager') {
-    const hat = cone(0.30, 0.16, mat(0xc9a86a), 0, 1.42, 0, 8);   // straw hat
-    hat.scale.y = 0.7; g.add(hat);
+    const v = Math.random();
+    if (v < 0.35) {                                              // straw hat
+      const hat = cone(0.30, 0.16, mat(0xc9a86a), 0, 1.42, 0, 8);
+      hat.scale.y = 0.7; g.add(hat);
+    } else if (v < 0.6) {                                        // hood
+      g.add(cone(0.22, 0.3, mat(new THREE.Color(bodyColor).multiplyScalar(0.7).getHex()), 0, 1.4, 0, 7));
+    } else if (v < 0.8) {                                        // linen coif
+      g.add(cyl(0.16, 0.17, 0.14, mat(0xe8dcc2), 0, 1.4, 0, 8));
+    }                                                            // else bareheaded
+    if (Math.random() < 0.3) {                                   // apron
+      const ap = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.4, 0.05), mat(0xd9cfb8));
+      ap.position.set(0, 0.7, 0.17); g.add(ap);
+    }
   } else if (role === 'guard') {
     g.add(cyl(0.17, 0.19, 0.16, mat(0x8d949c), 0, 1.40, 0, 8));   // helmet
     g.add(cone(0.19, 0.14, mat(0x8d949c), 0, 1.52, 0, 8));
@@ -320,7 +485,43 @@ function animateFigure(a, dt) {
   L.legR.rotation.x = -s;
   L.armL.rotation.x = -s * 0.7;
   L.armR.rotation.x = s * 0.7;
-  a.grp.position.y = Math.abs(Math.sin(a.bob)) * 0.06 * a._swing;
+  a.grp.position.y = (a.baseY || 0) + Math.abs(Math.sin(a.bob)) * 0.06 * a._swing;
+}
+
+// wall sentries — ceremonial watchmen pacing the wall tops (visual only)
+function sentryTick(dt) {
+  for (const w of state.walls) {
+    if (!w.sentries) {
+      w.per = wallPerimeter(w);
+      const count = Math.max(1, Math.min(3, Math.floor(w.per / 60)));
+      w.sentries = [];
+      for (let i=0;i<count;i++){
+        const grp = makeFigure(0x54607a, 'guard');
+        grp.scale.setScalar(0.85);
+        scene.add(grp);
+        w.sentries.push({ s:(i+0.5)*w.per/count, dir:1, grp, bob:Math.random()*6, x:0, z:0, baseY:WALL_H, _moved:false });
+      }
+    }
+    for (const st of w.sentries) {
+      st.bob += dt*7;
+      let watch = null, best = 45;
+      for (const bd of state.bandits) {
+        const d = Math.hypot(bd.x-st.x, bd.z-st.z);
+        if (d < best) { best = d; watch = bd; }
+      }
+      if (!watch) {
+        st.s += st.dir * 1.3 * dt;
+        st._moved = true;
+        if (w.closed) st.s = (st.s + w.per) % w.per;
+        else if (st.s >= w.per) { st.s = w.per; st.dir = -1; }
+        else if (st.s <= 0) { st.s = 0; st.dir = 1; }
+      }
+      const p = wallPointAt(w, st.s);
+      st.x = p.x; st.z = p.z;
+      st.grp.position.x = p.x; st.grp.position.z = p.z;
+      st.grp.rotation.y = watch ? Math.atan2(watch.x-p.x, watch.z-p.z) : p.ang + (st.dir < 0 ? Math.PI : 0);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- walls
@@ -390,6 +591,67 @@ function composeWard(sa, ea, D) {
   return (cand[0] && area(cand[0]) > 16) ? cand[0] : null;
 }
 
+// --------------------------------------------- walking: walls block, gates pass
+function segsCross(ax,az,bx,bz,cx,cz,dx,dz) {
+  const d1 = (bx-ax)*(cz-az)-(bz-az)*(cx-ax);
+  const d2 = (bx-ax)*(dz-az)-(bz-az)*(dx-ax);
+  const d3 = (dx-cx)*(az-cz)-(dz-cz)*(ax-cx);
+  const d4 = (dx-cx)*(bz-cz)-(dz-cz)*(bx-cx);
+  return ((d1>0) !== (d2>0)) && ((d3>0) !== (d4>0));
+}
+function canWalk(ax, az, bx, bz) {
+  for (const w of state.walls)
+    for (const s of (w.blockers || []))
+      if (segsCross(ax,az,bx,bz, s.ax,s.az,s.bx,s.bz)) return false;
+  return true;
+}
+// waypoint path through gate centers (small Dijkstra — node counts stay tiny)
+function findPath(ax, az, bx, bz) {
+  if (canWalk(ax, az, bx, bz)) return [{x:bx, z:bz}];
+  const nodes = [{x:ax, z:az}];
+  for (const w of state.walls) for (const g of (w.gatePts || [])) nodes.push(g);
+  nodes.push({x:bx, z:bz});
+  const N = nodes.length;
+  const dist = Array(N).fill(Infinity), prev = Array(N).fill(-1), used = Array(N).fill(false);
+  dist[0] = 0;
+  for (;;) {
+    let u = -1, bd = Infinity;
+    for (let i=0;i<N;i++) if (!used[i] && dist[i] < bd) { bd = dist[i]; u = i; }
+    if (u < 0 || u === N-1) break;
+    used[u] = true;
+    for (let v=1;v<N;v++) {
+      if (used[v] || !canWalk(nodes[u].x, nodes[u].z, nodes[v].x, nodes[v].z)) continue;
+      const nd = dist[u] + Math.hypot(nodes[v].x-nodes[u].x, nodes[v].z-nodes[u].z);
+      if (nd < dist[v]) { dist[v] = nd; prev[v] = u; }
+    }
+  }
+  if (dist[N-1] === Infinity) return null;
+  const path = [];
+  for (let c = N-1; c > 0; c = prev[c]) path.unshift({ x:nodes[c].x, z:nodes[c].z });
+  return path;
+}
+function wallPerimeter(w) {
+  const n = w.path.length, segs = w.closed ? n : n-1;
+  let L = 0;
+  for (let i=0;i<segs;i++) L += Math.hypot(w.path[(i+1)%n].x-w.path[i].x, w.path[(i+1)%n].z-w.path[i].z);
+  return L;
+}
+function wallPointAt(w, s) {
+  const n = w.path.length, segs = w.closed ? n : n-1;
+  let rem = s;
+  for (let i=0;i<segs;i++){
+    const a = w.path[i], b = w.path[(i+1)%n];
+    const L = Math.hypot(b.x-a.x, b.z-a.z);
+    if (rem <= L) {
+      const t = L ? rem/L : 0;
+      return { x:a.x+(b.x-a.x)*t, z:a.z+(b.z-a.z)*t, ang:Math.atan2(b.x-a.x, b.z-a.z) };
+    }
+    rem -= L;
+  }
+  const e = w.path[w.closed ? 0 : n-1];
+  return { x:e.x, z:e.z, ang:0 };
+}
+
 // gates: [{seg, t}] — gate carved into segment `seg` at param t along it.
 // Walls are built solid; gates exist only where the player cuts them (Gate tool).
 function buildWallMeshes(verts, closed=true, gates=null) {
@@ -398,6 +660,7 @@ function buildWallMeshes(verts, closed=true, gates=null) {
   const segCount = closed ? n : n-1;
   const segLen = i => Math.hypot(verts[(i+1)%n].x-verts[i].x, verts[(i+1)%n].z-verts[i].z);
   if (!gates) gates = [];
+  const blockers = [], gatePts = [];   // solid spans + gate centers, for pathing
   const merlonMats = [];
   for (let i=0;i<segCount;i++){
     const a = verts[i], b = verts[(i+1)%n];
@@ -419,6 +682,8 @@ function buildWallMeshes(verts, closed=true, gates=null) {
     for (const [s0, s1] of spans) {
       const w2 = s1 - s0;
       if (w2 < 0.4) continue;
+      const b0 = along(s0), b1 = along(s1);
+      blockers.push({ ax:b0.x, az:b0.z, bx:b1.x, bz:b1.z });
       const p = along((s0+s1)/2);
       const w = box(WALL_T, WALL_H, w2, MAT.stone, p.x, WALL_H/2, p.z);
       w.rotation.y = ang; group.add(w);
@@ -430,6 +695,7 @@ function buildWallMeshes(verts, closed=true, gates=null) {
     }
     // gatehouses
     for (const gc of segGates) {
+      gatePts.push({ x: along(gc).x, z: along(gc).z });
       for (const s of [-1, 1]) {
         const p = along(gc + s * (GATE_W/2 + 0.6));
         group.add(cyl(1.2, 1.4, WALL_H+2.4, MAT.stoneD, p.x, (WALL_H+2.4)/2, p.z, 8));
@@ -461,7 +727,7 @@ function buildWallMeshes(verts, closed=true, gates=null) {
     });
     group.add(im);
   }
-  return { group, gates };
+  return { group, gates, blockers, gatePts };
 }
 
 // rebuild one wall's meshes in place (after adding a gate)
@@ -469,7 +735,10 @@ function rebuildWall(w) {
   scene.remove(w.group);
   const r = buildWallMeshes(w.path, w.closed, w.gates);
   w.group = r.group;
+  w.blockers = r.blockers;
+  w.gatePts = r.gatePts;
   scene.add(w.group);
+  state.villagers.forEach(v => { v.path = null; });
 }
 
 function refreshDepths() {
@@ -485,6 +754,7 @@ let wallPreview = new THREE.Group();
 scene.add(wallPreview);
 
 const ray = new THREE.Raycaster();
+const _v3 = new THREE.Vector3();
 const groundPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
 const mouse = new THREE.Vector2();
 let mouseGround = new THREE.Vector3();
@@ -542,7 +812,9 @@ function placeBuilding(type, x, z, free=false) {
   const group = buildMesh(type);
   group.position.set(x, 0, z);
   scene.add(group);
-  const b = { type, x, z, hp:def.hp, maxHp:def.hp, depth:wardDepth(x,z), ruined:false, group, hitFlash:0 };
+  const b = { type, x, z, hp:def.hp, maxHp:def.hp, depth:wardDepth(x,z), ruined:false, group, hitFlash:0,
+    buildT: free ? 1 : 0, burnT: 0, smolderT: 0 };
+  if (!free) { dustBurst(x, z, Math.max(def.w, def.d)/2 + 0.5, 10); group.scale.setScalar(0.25); }
   group.traverse(o => { o.userData.b = b; });
   state.buildings.push(b);
   return b;
@@ -592,9 +864,10 @@ function completeConnector(endAttach) {
   const poly = composeWard(startAttach, endAttach, D);
   if (!poly) { msg('That ward would be too small — give it more room.', 'warn'); wallDraft.pop(); return; }
   state.stone -= cost;
-  const { group, gates } = buildWallMeshes(D, false);
+  const { group, gates, blockers, gatePts } = buildWallMeshes(D, false);
   scene.add(group);
-  state.walls.push({ poly, path:D, closed:false, group, gates });
+  state.walls.push({ poly, path:D, closed:false, group, gates, blockers, gatePts });
+  state.villagers.forEach(v => { v.path = null; });
   refreshDepths();
   const inside = state.buildings.filter(b => b.depth > 0 && !b.ruined).length;
   msg(`Walls joined — 🪨${cost}. A new ward is enclosed (${inside} building${inside===1?'':'s'} behind walls).`, 'good');
@@ -603,6 +876,24 @@ function completeConnector(endAttach) {
   wallDraft = []; startAttach = null;
   redrawWallPreview();
   saveGame();
+}
+
+// one gate-tool click at world coords (shared by mouse input and test hooks)
+function gateClickAt(wx, wz) {
+  const sp = wallSnap(wx, wz);
+  if (!sp) { msg('Click on a wall to cut a gate into it.', 'warn'); return false; }
+  const w = sp.wall, n = w.path.length;
+  const a = w.path[sp.seg], b = w.path[(sp.seg+1)%n];
+  const len = Math.hypot(b.x-a.x, b.z-a.z);
+  if (len <= GATE_W + 2) { msg('That stretch of wall is too short for a gate.', 'warn'); return false; }
+  if (w.gates.some(g => g.seg === sp.seg && Math.abs(g.t - sp.t) * len < GATE_W + 2)) { msg('There is already a gate there.', 'warn'); return false; }
+  if (state.stone < GATE_COST) { msg(`A gate costs 🪨${GATE_COST}.`, 'warn'); return false; }
+  state.stone -= GATE_COST;
+  w.gates.push({ seg: sp.seg, t: sp.t });
+  rebuildWall(w);
+  msg('Gate cut through the wall.', 'good');
+  saveGame();
+  return true;
 }
 
 // one wall-tool click at world coords (shared by mouse input and test hooks)
@@ -667,9 +958,14 @@ function tryCloseWall() {
   if (hit) { msg(`The wall would cut through a ${hit.nm.toLowerCase()}. Route it around.`, 'warn'); return; }
   state.stone -= cost;
   const verts = wallDraft.map(v => ({x:v.x, z:v.z}));
-  const { group, gates } = buildWallMeshes(verts, true);
+  const { group, gates, blockers, gatePts } = buildWallMeshes(verts, true);
   scene.add(group);
-  state.walls.push({ poly: verts, path: verts, closed: true, group, gates });
+  state.walls.push({ poly: verts, path: verts, closed: true, group, gates, blockers, gatePts });
+  state.villagers.forEach(v => { v.path = null; });
+  if (state.walls.length === 1 && state.raidNum === 0) {
+    state.raidTimer = 90;
+    msg('Word of a walled town spreads. Raiders will come for its wealth.', 'warn');
+  }
   refreshDepths();
   const inside = state.buildings.filter(b => b.depth > 0 && !b.ruined).length;
   msg(`Ring closed — 🪨${cost}. ${inside} building${inside===1?'':'s'} now behind walls.`, 'good');
@@ -692,6 +988,7 @@ function setTool(t) {
   }
   document.querySelectorAll('.tool').forEach(el => el.classList.toggle('active', el.dataset.t === tool));
   hintEl.style.display = 'none';
+  if (tool && TOOL_HINTS[tool] && !seenHints[tool]) { seenHints[tool] = true; msg(TOOL_HINTS[tool], 'dim'); }
 }
 
 // ---------------------------------------------------------------- UI
@@ -708,24 +1005,78 @@ function msg(text, cls='') {
   setTimeout(() => d.remove(), 10600);
 }
 
+// ---------------------------------------------------------------- founding charter
+const OBJECTIVES = [
+  { id:'wall',   label:'Ring the Keep in stone (Wall — 1)',  test:() => state.buildings.some(b => b.type==='keep' && b.depth > 0) },
+  { id:'gate',   label:'Cut a gate through it (Gate — 2)',   test:() => state.walls.some(w => w.gates.length > 0) },
+  { id:'houses', label:'Raise two houses in the ward',       test:() => state.buildings.filter(b => !b.ruined && b.type==='house' && b.depth>0).length >= 2 },
+  { id:'farm',   label:'Plant a farm outside the walls',     test:() => state.buildings.some(b => !b.ruined && b.type==='farm') },
+  { id:'raid',   label:'Survive the first raid',             test:() => state.raidNum >= 1 && state.bandits.length === 0 },
+];
+const objDone = {};
+let objAllDoneAt = 0, objT = 0;
+function updateObjectives(silent=false) {
+  if (!state.started || state.over) return;
+  let all = true;
+  for (const o of OBJECTIVES) {
+    if (!objDone[o.id]) {
+      if (o.test()) { objDone[o.id] = true; if (!silent) msg(`✔ ${o.label}`, 'good'); }
+      else all = false;
+    }
+  }
+  if (all && !objAllDoneAt) {
+    objAllDoneAt = state.time || 0.001;
+    if (!silent) msg('The charter is fulfilled. Grow rich behind your walls.', 'good');
+  }
+  const el = $('objectives');
+  if (objAllDoneAt && state.time - objAllDoneAt > 12) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerHTML = '<h4>FOUNDING CHARTER</h4>' + OBJECTIVES.map(o =>
+    `<div class="obj ${objDone[o.id]?'done':''}"><span class="tick">${objDone[o.id]?'✔':'▢'}</span><span class="lbl">${o.label}</span></div>`).join('');
+}
+
+const TOOL_HINTS = {
+  wall: 'Click corners on the ground; click your first post (or press Enter) to close the ring. Start on an existing wall to join it.',
+  gate: 'Click anywhere on a wall to cut a gate through it.',
+};
+const seenHints = {};
+
 function costStr(cost) {
   const ic = { gold:'🪙', wood:'🪵', stone:'🪨' };
   return Object.entries(cost).map(([k,v]) => `${ic[k]}${v}`).join(' ') || '—';
 }
 {
+  const TOOL_GROUPS = [
+    { nm:'WALLS',    tools:['wall','gate'] },
+    { nm:'TOWN',     tools:['house','market'] },
+    { nm:'INDUSTRY', tools:['farm','woodcutter','quarry'] },
+    { nm:'DEFENSE',  tools:['tower','barracks'] },
+    { nm:'',         tools:['demolish'] },
+  ];
   const pal = $('palette');
-  for (const t of TOOL_ORDER) {
-    const el = document.createElement('div');
-    el.className = 'tool'; el.dataset.t = t;
-    if (t === 'wall') el.innerHTML = `<div class="ico">🧱</div><div class="nm">Wall</div><div class="cost">🪨${WALL_COST_PER_UNIT}/step</div>`;
-    else if (t === 'gate') el.innerHTML = `<div class="ico">🚪</div><div class="nm">Gate</div><div class="cost">🪨${GATE_COST}</div>`;
-    else if (t === 'demolish') el.innerHTML = `<div class="ico">🔨</div><div class="nm">Demolish</div><div class="cost">refund ½</div>`;
-    else {
-      const d = BUILD_DEFS[t];
-      el.innerHTML = `<div class="ico">${d.ico}</div><div class="nm">${d.nm}</div><div class="cost">${costStr(d.cost)}</div>`;
+  for (const grp of TOOL_GROUPS) {
+    const gEl = document.createElement('div');
+    gEl.className = 'toolgroup';
+    gEl.innerHTML = `<div class="gname">${grp.nm}&nbsp;</div>`;
+    const row = document.createElement('div');
+    row.className = 'grow';
+    for (const t of grp.tools) {
+      const el = document.createElement('div');
+      el.className = 'tool'; el.dataset.t = t;
+      const key = TOOL_ORDER.indexOf(t) === 9 ? 0 : TOOL_ORDER.indexOf(t)+1;
+      if (t === 'wall') el.innerHTML = `<div class="ico">🧱</div><div class="nm">Wall</div><div class="cost">🪨${WALL_COST_PER_UNIT}/step</div>`;
+      else if (t === 'gate') el.innerHTML = `<div class="ico">🚪</div><div class="nm">Gate</div><div class="cost">🪨${GATE_COST}</div>`;
+      else if (t === 'demolish') el.innerHTML = `<div class="ico">🔨</div><div class="nm">Demolish</div><div class="cost">refund ½</div>`;
+      else {
+        const d = BUILD_DEFS[t];
+        el.innerHTML = `<div class="ico">${d.ico}</div><div class="nm">${d.nm}</div><div class="cost">${costStr(d.cost)}</div>`;
+      }
+      el.title = `Hotkey ${key}`;
+      el.onclick = () => setTool(t);
+      row.appendChild(el);
     }
-    el.onclick = () => setTool(t);
-    pal.appendChild(el);
+    gEl.appendChild(row);
+    pal.appendChild(gEl);
   }
 }
 
@@ -842,7 +1193,8 @@ function banditTick(bd, dt) {
   if (bd.state === 'flee') {
     if (!bd.exit) bd.exit = nearestEdgeExit(bd.x, bd.z);
     moveToward(bd, bd.exit.x, bd.exit.z, dt);
-    if (Math.abs(bd.x) > MAP+16 || Math.abs(bd.z) > MAP+16) removeBandit(bd);
+    bd.fleeT = (bd.fleeT || 0) + dt;
+    if (Math.abs(bd.x) > MAP+16 || Math.abs(bd.z) > MAP+16 || bd.fleeT > 30) removeBandit(bd);
     return;
   }
   // engaged by a guard?
@@ -889,6 +1241,7 @@ function banditTick(bd, dt) {
     else {
       t.hp -= bd.dps * dt;
       t.hitFlash = 0.4;
+      t.burnT = 0.5;
       if (t.hp <= 0) destroyBuilding(t, bd);
     }
   }
@@ -897,12 +1250,31 @@ function moveToward(a, tx, tz, dt) {
   const d = Math.hypot(tx-a.x, tz-a.z);
   if (d < 0.01) return;
   a._moved = true;
-  a.x += (tx-a.x)/d * a.speed * dt;
-  a.z += (tz-a.z)/d * a.speed * dt;
+  let nx = a.x + (tx-a.x)/d * a.speed * dt;
+  let nz = a.z + (tz-a.z)/d * a.speed * dt;
+  // walls are solid: slide along them instead of ghosting through
+  if (!canWalk(a.x, a.z, nx, nz)) {
+    if (canWalk(a.x, a.z, nx, a.z)) nz = a.z;
+    else if (canWalk(a.x, a.z, a.x, nz)) nx = a.x;
+    else { nx = a.x; nz = a.z; }
+  }
+  a.x = nx; a.z = nz;
+  // buildings are solid: push out of their footprints
+  for (const b of state.buildings) {
+    if (b.ruined) continue;
+    const def = BUILD_DEFS[b.type];
+    const hw = def.w/2 + 0.35, hd = def.d/2 + 0.35;
+    const dx = a.x - b.x, dz = a.z - b.z;
+    if (Math.abs(dx) < hw && Math.abs(dz) < hd) {
+      if (hw - Math.abs(dx) < hd - Math.abs(dz)) a.x = b.x + Math.sign(dx || 1) * hw;
+      else a.z = b.z + Math.sign(dz || 1) * hd;
+    }
+  }
   a.grp.position.x = a.x; a.grp.position.z = a.z;
   a.grp.rotation.y = Math.atan2(tx-a.x, tz-a.z);
 }
 function removeBandit(bd) {
+  smokePuff(bd.x, 0.8, bd.z);
   scene.remove(bd.grp);
   const i = state.bandits.indexOf(bd);
   if (i >= 0) state.bandits.splice(i, 1);
@@ -911,6 +1283,8 @@ function removeBandit(bd) {
 
 function destroyBuilding(b, byBandit=null) {
   b.ruined = true; b.hp = 0;
+  b.burnT = 0; b.smolderT = 25;
+  for (let i=0;i<6;i++) { flamePuff(b.x, 1.5, b.z); smokePuff(b.x, 2.0, b.z, true); }
   scene.remove(b.group);
   b.group = makeRuin(b);
   b.group.traverse(o => { o.userData.b = b; });
@@ -935,6 +1309,7 @@ function spawnGuard(bk) {
 function guardTick(g, dt) {
   if (g.home.ruined) { scene.remove(g.grp); state.guards.splice(state.guards.indexOf(g),1); return; }
   if (g.hp <= 0) {
+    smokePuff(g.x, 0.8, g.z);
     scene.remove(g.grp);
     state.guards.splice(state.guards.indexOf(g), 1);
     g.home.respawnQ = (g.home.respawnQ || 0) + 1;
@@ -959,8 +1334,10 @@ function guardTick(g, dt) {
     return;
   }
   // patrol
-  if (!g.patrol || Math.hypot(g.patrol.x-g.x, g.patrol.z-g.z) < 1) {
+  g.patrolAge = (g.patrolAge || 0) + dt;
+  if (!g.patrol || g.patrolAge > 7 || Math.hypot(g.patrol.x-g.x, g.patrol.z-g.z) < 1) {
     g.patrol = { x:g.home.x + (Math.random()-0.5)*20, z:g.home.z + (Math.random()-0.5)*20 };
+    g.patrolAge = 0;
   }
   moveToward(g, g.patrol.x, g.patrol.z, dt * 0.45);
 }
@@ -1002,8 +1379,8 @@ function villagerTick(dt) {
   const homes = state.buildings.filter(b => !b.ruined && (b.type==='house' || b.type==='keep'));
   while (state.villagers.length < want && homes.length) {
     const h = homes[Math.random()*homes.length|0];
-    const grp = makeFigure([0x8c6a3a, 0x5a7a4a, 0x7a5a7a, 0x9c8248][Math.random()*4|0], 'villager');
-    grp.scale.setScalar(0.8);
+    const grp = makeFigure([0x8c6a3a, 0x5a7a4a, 0x7a5a7a, 0x9c8248, 0x6a4a6a, 0x4a6a7a, 0xa87848, 0x836b52][Math.random()*8|0], 'villager');
+    grp.scale.setScalar(0.7 + Math.random()*0.22);
     grp.position.set(h.x+1.5, 0, h.z+1.5);
     scene.add(grp);
     state.villagers.push({ x:h.x+1.5, z:h.z+1.5, home:h, tgt:null, speed:1.6, grp, bob:Math.random()*6, wait:Math.random()*3 });
@@ -1016,11 +1393,51 @@ function villagerTick(dt) {
     if (v.home.ruined) { v.home = homes.length ? homes[0] : v.home; }
     v.bob += dt*8;
     if (v.wait > 0) { v.wait -= dt; continue; }
-    if (!v.tgt || Math.hypot(v.tgt.x-v.x, v.tgt.z-v.z) < 0.5) {
-      v.tgt = { x:v.home.x + (Math.random()-0.5)*10, z:v.home.z + (Math.random()-0.5)*10 };
-      v.wait = 1 + Math.random()*4;
+    if (!v.path) {
+      // pick an errand: fields, market, the keep — routed through gates
+      let dest = null;
+      if (v.phase === 'out') dest = v.home;
+      else {
+        const r = Math.random();
+        const farms = state.buildings.filter(b => !b.ruined && b.type === 'farm');
+        const markets = state.buildings.filter(b => !b.ruined && b.type === 'market');
+        if (r < 0.35 && farms.length) dest = farms[Math.random()*farms.length|0];
+        else if (r < 0.55 && markets.length) dest = markets[Math.random()*markets.length|0];
+        else if (r < 0.65) dest = state.buildings.find(b => b.type === 'keep');
+      }
+      if (dest) {
+        const dd = BUILD_DEFS[dest.type];
+        const oa = Math.random()*Math.PI*2;
+        const off = Math.max(dd.w, dd.d)/2 + 1.0 + Math.random()*1.5;   // just outside the footprint
+        v.path = findPath(v.x, v.z, dest.x + Math.cos(oa)*off, dest.z + Math.sin(oa)*off);
+        if (v.path) { v.pathi = 0; v.wpT = 0; v.phase = (dest === v.home) ? 'homeward' : 'out'; }
+      }
+      if (!v.path) {
+        // no errand (or sealed ward): wander near home without ghosting through walls
+        const tx = v.home.x + (Math.random()-0.5)*12, tz = v.home.z + (Math.random()-0.5)*12;
+        if (canWalk(v.x, v.z, tx, tz)) { v.path = [{x:tx, z:tz}]; v.pathi = 0; }
+        else v.wait = 1.5;
+        if (v.phase === 'homeward') v.phase = 'idle';
+      }
+      continue;
     }
-    moveToward(v, v.tgt.x, v.tgt.z, dt);
+    const wp = v.path[v.pathi];
+    v.wpT = (v.wpT || 0) + dt;
+    if (v.wpT > 8) {   // blocked (collision, crowd) — give up on this errand
+      v.path = null; v.wait = 1.5;
+      if (v.phase === 'homeward') v.phase = 'idle';
+      continue;
+    }
+    if (Math.hypot(wp.x-v.x, wp.z-v.z) < 0.8) {
+      v.pathi++; v.wpT = 0;
+      if (v.pathi >= v.path.length) {
+        v.path = null;
+        v.wait = 2 + Math.random()*4;
+        if (v.phase === 'homeward') v.phase = 'idle';
+      }
+      continue;
+    }
+    moveToward(v, wp.x, wp.z, dt);
   }
 }
 
@@ -1088,20 +1505,7 @@ function handleClick() {
     return;
   }
   if (tool === 'gate') {
-    const sp = wallSnap(mouseGround.x, mouseGround.z);
-    if (!sp) { msg('Click on a wall to cut a gate into it.', 'warn'); return; }
-    const w = sp.wall, n = w.path.length;
-    const a = w.path[sp.seg], b = w.path[(sp.seg+1)%n];
-    const len = Math.hypot(b.x-a.x, b.z-a.z);
-    if (len <= GATE_W + 2) { msg('That stretch of wall is too short for a gate.', 'warn'); return; }
-    const tooClose = w.gates.some(g => g.seg === sp.seg && Math.abs(g.t - sp.t) * len < GATE_W + 2);
-    if (tooClose) { msg('There is already a gate there.', 'warn'); return; }
-    if (state.stone < GATE_COST) { msg(`A gate costs 🪨${GATE_COST}.`, 'warn'); return; }
-    state.stone -= GATE_COST;
-    w.gates.push({ seg: sp.seg, t: sp.t });
-    rebuildWall(w);
-    msg('Gate cut through the wall.', 'good');
-    saveGame();
+    gateClickAt(mouseGround.x, mouseGround.z);
     return;
   }
   if (tool === 'demolish') {
@@ -1165,9 +1569,9 @@ function loadGame() {
   for (const w of s.walls) {
     const path = w.path || w.verts, poly = w.poly || w.verts;   // legacy saves used {verts}
     const closed = w.closed !== undefined ? w.closed : true;
-    const { group, gates } = buildWallMeshes(path, closed, w.gates || null);
+    const { group, gates, blockers, gatePts } = buildWallMeshes(path, closed, w.gates || null);
     scene.add(group);
-    state.walls.push({ poly, path, closed, group, gates });
+    state.walls.push({ poly, path, closed, group, gates, blockers, gatePts });
   }
   for (const b of s.buildings) {
     const nb = placeBuilding(b.type, b.x, b.z, true);
@@ -1180,9 +1584,9 @@ function loadGame() {
 
 function newTownSetup() {
   placeBuilding('keep', 0, 0, true);
-  msg('Welcome to the valley. The Keep stands alone — raiders arrive on day 3.', 'warn');
+  msg('Welcome to the valley. The Keep stands alone.', 'dim');
   msg('Walls first: ring the Keep in stone (Wall tool, key 1).', 'dim');
-  msg('Then raise houses inside the ward — the town lives behind walls.', 'dim');
+  updateObjectives(true);
 }
 
 // ---------------------------------------------------------------- main loop
@@ -1196,9 +1600,11 @@ function step(dt) {
     saveGame();
   }
   economyTick(dt);
-  // raids
-  state.raidTimer -= dt;
-  if (state.raidTimer <= 0) spawnRaid();
+  // raiders only muster once there are walls worth plundering
+  if (state.walls.length) {
+    state.raidTimer -= dt;
+    if (state.raidTimer <= 0) spawnRaid();
+  }
   for (const bd of [...state.bandits]) banditTick(bd, dt);
   for (const g of [...state.guards]) guardTick(g, dt);
   for (const b of state.buildings) {
@@ -1221,11 +1627,16 @@ function step(dt) {
   }
   for (const a of [...state.arrows]) arrowTick(a, dt);
   villagerTick(dt);
+  sentryTick(dt);
   // walk-cycle pass: reads the _moved flags the ticks above just set
-  for (const a of [...state.bandits, ...state.guards, ...state.villagers]) {
+  const figures = [...state.bandits, ...state.guards, ...state.villagers];
+  for (const w of state.walls) if (w.sentries) figures.push(...w.sentries);
+  for (const a of figures) {
     animateFigure(a, dt);
     a._moved = false;
   }
+  objT += dt;
+  if (objT >= 0.5) { objT = 0; updateObjectives(); }
 }
 
 function frame(dt) {
@@ -1283,7 +1694,67 @@ function frame(dt) {
       ? `<span class="safe">🛡 Ward ${['','I','II','III','IV','V'][Math.min(depth,5)]} — protected${depth>1?`, tax ×${(1+0.25*(depth-1)).toFixed(2)}`:''}</span>`
       : `<span class="unsafe">⚠ Outside the walls — raidable</span>`;
     hintEl.innerHTML = (chk.ok ? safety : `<span class="unsafe">✖ ${chk.why}</span>`);
+  } else if (state.started && !state.over) {
+    // no tool: hover a building for its ledger entry
+    const b = pickBuilding();
+    if (b) {
+      const def = BUILD_DEFS[b.type];
+      hintEl.style.display = 'block';
+      hintEl.style.left = (mousePx.x + 16) + 'px';
+      hintEl.style.top = (mousePx.y + 12) + 'px';
+      let html = `${def.ico} ${def.nm}${b.ruined ? ' — ruin (Demolish to clear)' : ''}`;
+      if (!b.ruined && (b.type === 'house' || b.type === 'keep')) {
+        const occ = Math.round(def.popCap * Math.min(1, state.pop / Math.max(1, popCap())));
+        const rate = b.depth >= 1 ? 2 * (1 + 0.25 * (b.depth - 1)) : 0.8;
+        html += `\n<span class="${b.depth ? 'safe' : 'unsafe'}">${b.depth ? `🛡 Ward ${['','I','II','III','IV','V'][Math.min(b.depth,5)]}` : '⚠ Outside walls'}</span> · ${occ} folk · 🪙${(occ*rate).toFixed(1)}/day`;
+      }
+      if (!b.ruined && b.hp < b.maxHp - 0.5) html += `\n${Math.round(b.hp)}/${b.maxHp} hp`;
+      hintEl.innerHTML = html;
+    } else hintEl.style.display = 'none';
   } else hintEl.style.display = 'none';
+
+  // visual pass: atmosphere, particles, build-in scaling, fire & smoke
+  updateAtmosphere();
+  updateParticles(dt);
+  for (const b of state.buildings) {
+    if (b.buildT < 1) {
+      b.buildT = Math.min(1, b.buildT + dt);
+      const e = 1 - Math.pow(1 - b.buildT, 3);
+      b.group.scale.set(0.3+0.7*e, 0.15+0.85*e, 0.3+0.7*e);
+    }
+    if (b.burnT > 0) {
+      b.burnT -= dt;
+      b._fl = (b._fl || 0) - dt;
+      if (b._fl <= 0) { b._fl = 0.12; flamePuff(b.x, 1.4, b.z); if (Math.random() < 0.5) smokePuff(b.x, 2.4, b.z); }
+    }
+    if (b.smolderT > 0) {
+      b.smolderT -= dt;
+      b._smk = (b._smk || 0) - dt;
+      if (b._smk <= 0) { b._smk = 0.4; smokePuff(b.x, 0.8, b.z); }
+    }
+  }
+
+  // raid direction marker at the screen edge
+  const arrowEl = $('raidarrow');
+  let rx = null, rz = null;
+  if (state.started && !state.over) {
+    if (state.bandits.length) {
+      rx = state.bandits.reduce((s,b) => s+b.x, 0) / state.bandits.length;
+      rz = state.bandits.reduce((s,b) => s+b.z, 0) / state.bandits.length;
+    } else if (state.walls.length && state.raidTimer < 20 && state.raidEdge) {
+      rx = state.raidEdge.x * (MAP+12); rz = state.raidEdge.z * (MAP+12);
+    }
+  }
+  if (rx !== null) {
+    _v3.set(rx, 1, rz).project(camera);
+    let sx = (_v3.x*0.5+0.5)*innerWidth, sy = (-_v3.y*0.5+0.5)*innerHeight;
+    sx = Math.max(50, Math.min(innerWidth-50, sx));
+    sy = Math.max(60, Math.min(innerHeight-90, sy));
+    arrowEl.style.display = 'block';
+    arrowEl.style.left = (sx-15) + 'px';
+    arrowEl.style.top = (sy-20) + 'px';
+    arrowEl.style.transform = `rotate(${Math.atan2(sy - innerHeight/2, sx - innerWidth/2) * 180/Math.PI}deg)`;
+  } else arrowEl.style.display = 'none';
 
   updateHUD();
   renderer.render(scene, camera);
@@ -1320,7 +1791,10 @@ $('startbtn').onclick = () => {
   $('intro').style.display = 'none';
   state.started = true;
   if (!loadGame()) newTownSetup();
-  else msg('The town wakes. (Autosave restored — ⟲ New Town to start fresh.)', 'dim');
+  else {
+    msg('The town wakes. (Autosave restored — ⟲ New Town to start fresh.)', 'dim');
+    updateObjectives(true);   // seed the charter from restored progress, silently
+  }
 };
 
 // headless / test hooks (per project convention: expose sim + step)
@@ -1329,6 +1803,7 @@ window.BULWARK = {
   place: (t,x,z) => placeBuilding(t,x,z),
   wall: (verts) => { wallDraft = verts.map(v=>({x:v[0],z:v[1]})); startAttach = null; tryCloseWall(); },
   clickWall: (x,z) => { const prev = tool; tool = 'wall'; wallClickAt(x, z); tool = prev; },
+  cutGate: (x,z) => gateClickAt(x, z),
   start: () => { $('intro').style.display='none'; state.started = true; if (!state.buildings.length) newTownSetup(); },
   sim: (seconds, dt=0.1) => { for (let t=0;t<seconds;t+=dt) step(dt); return { ...state, buildings:state.buildings.length, walls:state.walls.length, bandits:state.bandits.length }; },
 };

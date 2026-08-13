@@ -8,7 +8,7 @@ let vols = { sfx: 0.8, music: 0.7, amb: 0.6 };
 let started = false;
 
 // ambience state
-let windSrc = null, cricketGain = null, birdTimer = 3, cricketLFO = null;
+let windSrc = null, cricketGain = null, birdTimer = 3, cricketLFO = null, rainGain = null;
 // music state
 let chordTimer = 1, pluckTimer = 4, chordIdx = 0;
 
@@ -161,6 +161,12 @@ function startAmbience() {
   cricketLFO.connect(lg); lg.connect(shaper.gain);
   co.connect(shaper).connect(cricketGain).connect(ambBus);
   co.start(); cricketLFO.start();
+  // rain: bright filtered noise, gain driven by the game's rain factor
+  const rn = ctx.createBufferSource(); rn.buffer = noiseBuffer(2.7); rn.loop = true;
+  const rf = ctx.createBiquadFilter(); rf.type = 'highpass'; rf.frequency.value = 1400;
+  rainGain = ctx.createGain(); rainGain.gain.value = 0;
+  rn.connect(rf).connect(rainGain).connect(ambBus);
+  rn.start();
 }
 function birdChirp() {
   const t = ctx.currentTime;
@@ -223,14 +229,15 @@ export const AudioSys = {
     const p = PATCHES[name];
     if (p) try { p(); } catch (e) {}
   },
-  // called every frame from the game with (dt, nightFactor 0..1)
-  update(dt, night) {
+  // called every frame from the game with (dt, nightFactor 0..1, rainFactor 0..1)
+  update(dt, night, rain = 0) {
     if (!started || !ctx) return;
-    if (cricketGain) cricketGain.gain.value = night * 0.05;
+    if (cricketGain) cricketGain.gain.value = night * 0.05 * (1 - rain);
+    if (rainGain) rainGain.gain.value = rain * 0.11;
     birdTimer -= dt;
     if (birdTimer <= 0) {
       birdTimer = 2.5 + Math.random()*7;
-      if (night < 0.4) try { birdChirp(); } catch(e){}
+      if (night < 0.4 && rain < 0.4) try { birdChirp(); } catch(e){}
     }
     chordTimer -= dt;
     if (chordTimer <= 0) { chordTimer = 8.5 + Math.random()*2; try { padChord(); } catch(e){} }

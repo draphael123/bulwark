@@ -108,7 +108,7 @@ const ATMO = [
   { t:1.00, sky:0x1d2842, sunI:0.30, sunC:0x8fa5d8, hemiI:0.35 },
 ];
 const _atA = new THREE.Color(), _atB = new THREE.Color();
-let nightFactor = 0;
+let nightFactor = 0, rainFactor = 0;
 function updateAtmosphere() {
   // light sweeps once per THREE game days — day counter stays 60s, but the
   // sky changes at a readable pace instead of strobing
@@ -126,6 +126,13 @@ function updateAtmosphere() {
   hemi.intensity = lerp(a.hemiI, b.hemiI);
   const ang = f * Math.PI * 2 - Math.PI/2;
   sun.position.set(Math.cos(ang)*100, Math.max(35, Math.sin(ang)*130), 40);
+  // rain greys the light
+  if (rainFactor > 0.01) {
+    scene.background.lerp(_atB.setHex(0x6a7687), rainFactor * 0.5);
+    scene.fog.color.copy(scene.background);
+    sun.intensity *= 1 - 0.5 * rainFactor;
+    hemi.intensity *= 1 - 0.3 * rainFactor;
+  }
   nightFactor = Math.max(0, Math.min(1, 1 - (sun.intensity - 0.3) / 1.0));
   MAT.window.opacity = nightFactor * 0.95;
   if (starPts) starPts.material.opacity = nightFactor * 0.9;
@@ -610,6 +617,42 @@ function smokePuff(x, y, z, big=false) {
 function flamePuff(x, y, z) {
   spawnP(x+(Math.random()-0.5)*1.1, y, z+(Math.random()-0.5)*1.1,
     { color:0xff8a2a, life:0.45+Math.random()*0.3, vy:2.4, grow:0.3, scale:0.9, opacity:0.85 });
+}
+
+// rain: recycled particle sheet that follows the camera
+const RAIN_N = 650;
+let rainPts;
+{
+  const v = new Float32Array(RAIN_N * 3);
+  for (let i=0;i<RAIN_N;i++){
+    v[i*3] = (Math.random()-0.5)*130;
+    v[i*3+1] = Math.random()*55;
+    v[i*3+2] = (Math.random()-0.5)*130;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(v, 3));
+  rainPts = new THREE.Points(g, new THREE.PointsMaterial({
+    color:0x9db8d8, size:0.22, transparent:true, opacity:0, depthWrite:false }));
+  rainPts.frustumCulled = false;
+  scene.add(rainPts);
+}
+function rainVisualTick(dt) {
+  const target = (state.raining ? 1 : 0);
+  rainFactor += (target - rainFactor) * Math.min(1, dt * 0.7);
+  rainPts.material.opacity = rainFactor * 0.55;
+  if (rainFactor < 0.02) return;
+  rainPts.position.set(camTarget.x, 0, camTarget.z);
+  const p = rainPts.geometry.attributes.position;
+  for (let i=0;i<RAIN_N;i++){
+    let y = p.getY(i) - 55 * dt;
+    if (y < 0) {
+      y = 45 + Math.random()*15;
+      p.setX(i, (Math.random()-0.5)*130);
+      p.setZ(i, (Math.random()-0.5)*130);
+    }
+    p.setY(i, y);
+  }
+  p.needsUpdate = true;
 }
 
 // sun disc + moon (soft sprites, driven by the atmosphere)
@@ -1540,7 +1583,7 @@ function rankTick() {
 function upgradeTick(dt) {
   state.upgCool -= dt;
   for (const b of state.buildings) {
-    if (b.ruined || b.type !== 'house' || b.depth < 1) continue;
+    if (b.ruined || b.onFire || b.type !== 'house' || b.depth < 1) continue;
     const ready = b._well && b._mkt && state.pop >= popCap() * 0.85;
     if (!ready) { b.upT = 0; continue; }
     b.upT = (b.upT || 0) + dt;
@@ -1563,6 +1606,21 @@ function upgradeTick(dt) {
   }
 }
 
+// weather: occasional rain — quenches fires, waters the fields
+function weatherTick(dt) {
+  state.weatherT = (state.weatherT ?? 150) - dt;
+  if (state.weatherT <= 0) {
+    if (state.raining) {
+      state.raining = false;
+      state.weatherT = 180 + Math.random()*240;
+    } else {
+      state.raining = true;
+      state.weatherT = 45 + Math.random()*50;
+      msg('Rain sweeps over the valley.', 'dim');
+    }
+  }
+}
+
 // fire — the price of density. Starts only after the charter is fulfilled.
 const FLAMMABLE = { house:1, townhouse:1.6, market:1, woodcutter:1.4, barracks:1 };
 function igniteBuilding(b) {
@@ -1572,12 +1630,13 @@ function igniteBuilding(b) {
   AudioSys.play('bell');
 }
 function fireTick(dt) {
-  if (!objAllDoneAt) return;   // no fires while learning
+  // new fires only start once the charter is fulfilled — but anything already
+  // burning is always processed
   state.fireCool -= dt;
-  if (state.fireCool <= 0) {
+  if (objAllDoneAt && state.fireCool <= 0) {
     for (const b of state.buildings) {
       if (b.ruined || b.onFire || b.depth < 1 || !FLAMMABLE[b.type]) continue;
-      const perSec = 0.0006 * FLAMMABLE[b.type] * (b._well ? 0.3 : 1);
+      const perSec = 0.0006 * FLAMMABLE[b.type] * (b._well ? 0.3 : 1) * (state.raining ? 0.2 : 1);
       if (Math.random() < perSec * dt) {
         igniteBuilding(b);
         state.fireCool = 140 + Math.random()*80;
@@ -1587,10 +1646,10 @@ function fireTick(dt) {
   }
   for (const b of state.buildings) {
     if (!b.onFire || b.ruined) continue;
-    const welled = b._well;
+    const welled = b._well, rainy = !!state.raining;
     b.fireT += dt;
     b.burnT = 0.5;   // feeds the flame/smoke particles
-    b.hp -= (welled ? 2 : 3.5) * dt;
+    b.hp -= ((welled || rainy) ? 2 : 3.5) * dt;
     if (!b._spread && b.fireT > 8) {
       b._spread = true;
       for (const o of state.buildings) {
@@ -1600,7 +1659,10 @@ function fireTick(dt) {
         if (Math.random() < resist) igniteBuilding(o);
       }
     }
-    if (welled && b.fireT > 7) {
+    if (rainy && b.fireT > 5) {
+      b.onFire = false;
+      msg('The rain quells the flames.', 'good');
+    } else if (welled && b.fireT > 7) {
       b.onFire = false;
       msg('The well brigade douses the flames.', 'good');
     } else if (b.hp <= 0) {
@@ -1677,7 +1739,7 @@ function economyTick(dt) {
   const housesInside = [];
   for (const b of state.buildings) {
     if (b.ruined) continue;
-    if (b.type === 'farm') state.food += BUILD_DEFS.farm.foodPerDay * perDay;
+    if (b.type === 'farm') state.food += BUILD_DEFS.farm.foodPerDay * (state.raining ? 1.25 : 1) * perDay;
     else if (b.type === 'woodcutter') state.wood += BUILD_DEFS.woodcutter.woodPerDay * perDay;
     else if (b.type === 'quarry') state.stone += BUILD_DEFS.quarry.stonePerDay * perDay;
     else if (b.type === 'house' || b.type === 'townhouse' || b.type === 'keep') {
@@ -1942,7 +2004,10 @@ function villagerTick(dt) {
     grp.scale.setScalar(0.7 + Math.random()*0.22);
     grp.position.set(h.x+1.5, 0, h.z+1.5);
     scene.add(grp);
-    const vv = { x:h.x+1.5, z:h.z+1.5, home:h, tgt:null, speed:1.6, grp, bob:Math.random()*6, wait:Math.random()*3,
+    const sack = box(0.34, 0.3, 0.26, new THREE.MeshLambertMaterial({ color:0xa8905e }), 0, 1.0, 0.32);
+    sack.visible = false;
+    grp.add(sack);
+    const vv = { x:h.x+1.5, z:h.z+1.5, home:h, tgt:null, speed:1.6, grp, sack, bob:Math.random()*6, wait:Math.random()*3,
       vname: FOLK_NAMES[Math.random()*FOLK_NAMES.length|0], trade: FOLK_TRADES[Math.random()*FOLK_TRADES.length|0] };
     grp.traverse(o => { o.userData.v = vv; });
     state.villagers.push(vv);
@@ -1973,7 +2038,17 @@ function villagerTick(dt) {
         const oa = Math.random()*Math.PI*2;
         const off = Math.max(dd.w, dd.d)/2 + 1.0 + Math.random()*1.5;   // just outside the footprint
         v.path = findPath(v.x, v.z, dest.x + Math.cos(oa)*off, dest.z + Math.sin(oa)*off);
-        if (v.path) { v.pathi = 0; v.wpT = 0; v.phase = (dest === v.home) ? 'homeward' : 'out'; }
+        if (v.path) {
+          v.pathi = 0; v.wpT = 0;
+          if (dest === v.home) {
+            v.phase = 'homeward';
+            // haul goods back from the fields and the market
+            if (v.sack && (v.destType === 'farm' || v.destType === 'market')) v.sack.visible = true;
+          } else {
+            v.phase = 'out';
+            v.destType = dest.type;
+          }
+        }
       }
       if (!v.path) {
         // no errand (or sealed ward): wander near home without ghosting through walls
@@ -1996,7 +2071,11 @@ function villagerTick(dt) {
       if (v.pathi >= v.path.length) {
         v.path = null;
         v.wait = 2 + Math.random()*4;
-        if (v.phase === 'homeward') v.phase = 'idle';
+        if (v.phase === 'homeward') {
+          v.phase = 'idle';
+          v.destType = null;
+          if (v.sack) v.sack.visible = false;
+        }
       }
       continue;
     }
@@ -2017,15 +2096,25 @@ addEventListener('keydown', e => {
   const idx = ['Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit7','Digit8','Digit9','Digit0'].indexOf(e.code);
   if (idx >= 0 && idx < TOOL_ORDER.length) setTool(TOOL_ORDER[idx]);
   if (e.code === 'KeyX') setTool('demolish');
+  if (e.code === 'Space' && state.started && !state.over && $('settings').style.display === 'none') {
+    e.preventDefault();
+    setSpeed(0);
+  }
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 
 let dragBtn = -1, lastMx = 0, lastMy = 0, dragDist = 0;
+const touchPts = new Map();   // active pointers on the canvas (for pinch)
+let pinchPrev = null;
 renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 renderer.domElement.addEventListener('pointerdown', e => {
+  touchPts.set(e.pointerId, { x:e.clientX, y:e.clientY });
+  if (touchPts.size >= 2) { dragBtn = -1; dragDist = 99; pinchPrev = null; return; }
   dragBtn = e.button; lastMx = e.clientX; lastMy = e.clientY; dragDist = 0;
 });
 addEventListener('pointerup', e => {
+  touchPts.delete(e.pointerId);
+  pinchPrev = null;
   if (dragBtn === 0 && dragDist < 6) {
     // refresh cursor state from the event itself (synthetic clicks may skip pointermove)
     mousePx.x = e.clientX; mousePx.y = e.clientY;
@@ -2041,6 +2130,22 @@ addEventListener('pointermove', e => {
   mousePx.x = e.clientX; mousePx.y = e.clientY;
   mouse.x = (e.clientX/innerWidth)*2 - 1;
   mouse.y = -(e.clientY/innerHeight)*2 + 1;
+  if (touchPts.has(e.pointerId)) touchPts.set(e.pointerId, { x:e.clientX, y:e.clientY });
+  if (touchPts.size === 2) {
+    // pinch: zoom by spread, pan by midpoint drift
+    const [a, b] = [...touchPts.values()];
+    const dist = Math.hypot(a.x-b.x, a.y-b.y);
+    const cx = (a.x+b.x)/2, cy = (a.y+b.y)/2;
+    if (pinchPrev) {
+      camDist *= pinchPrev.dist / Math.max(1, dist);
+      const panSpeed = camDist * 0.0016;
+      const dx = cx - pinchPrev.cx, dy = cy - pinchPrev.cy;
+      camTarget.x -= (dx*Math.cos(camYaw))*panSpeed + (dy*Math.sin(camYaw))*panSpeed;
+      camTarget.z -= (-dx*Math.sin(camYaw))*panSpeed + (dy*Math.cos(camYaw))*panSpeed;
+    }
+    pinchPrev = { dist, cx, cy };
+    return;
+  }
   if (dragBtn >= 0) {
     const dx = e.clientX-lastMx, dy = e.clientY-lastMy;
     dragDist += Math.abs(dx) + Math.abs(dy);
@@ -2111,7 +2216,7 @@ function pickBuilding() {
 // ---------------------------------------------------------------- game over / restart
 function gameOver() {
   state.over = true;
-  $('go-stats').textContent = `Your town stood for ${state.day} days · population ${fmt(state.pop)} · ${state.walls.length} ring${state.walls.length===1?'':'s'} of wall.`;
+  $('go-stats').textContent = `${state.townName || 'Your town'} stood for ${state.day} days · population ${fmt(state.pop)} · ${state.walls.length} wall${state.walls.length===1?'':'s'}.`;
   $('gameover').style.display = 'flex';
   localStorage.removeItem('bulwark-save');
 }
@@ -2230,6 +2335,7 @@ function step(dt) {
   sentryTick(dt);
   gateTick(dt);
   upgradeTick(dt);
+  weatherTick(dt);
   fireTick(dt);
   caravanTick(dt);
   rankTick();
@@ -2346,7 +2452,8 @@ function frame(dt) {
   // visual pass: atmosphere, particles, build-in scaling, fire & smoke
   if (!state.started) camYaw += dt * 0.05;   // slow orbit behind the title screen
   updateAtmosphere();
-  AudioSys.update(dt, nightFactor);
+  rainVisualTick(dt);
+  AudioSys.update(dt, nightFactor, rainFactor);
   updateParticles(dt);
   for (const c of clouds) {
     c.position.x += c.userData.speed * dt;
@@ -2380,6 +2487,10 @@ function frame(dt) {
     }
   }
 
+  // minimap (2Hz)
+  mapT -= dt;
+  if (state.started && mapT <= 0) { mapT = 0.5; drawMinimap(); }
+
   // upload accumulated path wear at most twice a second
   wearUp -= dt;
   if (wearDirty && wearUp <= 0) { wearUp = 0.5; wearTex.needsUpdate = true; wearDirty = false; }
@@ -2411,11 +2522,63 @@ function frame(dt) {
 }
 
 let last = performance.now(), lastRAF = performance.now();
-let autosaveT = 0, hoverT = 0, hoverB = null, hoverV = null;
+let autosaveT = 0, hoverT = 0, hoverB = null, hoverV = null, mapT = 0;
+
+// ---------------------------------------------------------------- minimap
+const MMAP_W = 150, MMAP_EXT = MAP + 20;
+const mmapEl = document.getElementById('minimap');
+const mmapCtx = mmapEl.getContext('2d');
+const MM_COLORS = { keep:'#d9a44a', house:'#c9b184', townhouse:'#e0c088', market:'#a05050',
+  well:'#6a9ab8', farm:'#8a9a4a', woodcutter:'#7a5c38', quarry:'#8a8a84', tower:'#b0b8c0', barracks:'#7a8598' };
+const mm = v => (v + MMAP_EXT) / (MMAP_EXT*2) * MMAP_W;
+function drawMinimap() {
+  mmapEl.style.display = 'block';
+  const g = mmapCtx;
+  g.clearRect(0, 0, MMAP_W, MMAP_W);
+  // walls
+  g.strokeStyle = '#b8b2a4'; g.lineWidth = 1.4;
+  for (const w of state.walls) {
+    g.beginPath();
+    w.path.forEach((p, i) => { i ? g.lineTo(mm(p.x), mm(p.z)) : g.moveTo(mm(p.x), mm(p.z)); });
+    if (w.closed) g.closePath();
+    g.stroke();
+  }
+  // buildings
+  for (const b of state.buildings) {
+    g.fillStyle = b.ruined ? '#3a352e' : (b.onFire ? '#ff7030' : (MM_COLORS[b.type] || '#999'));
+    const s = b.type === 'keep' ? 5 : 3;
+    g.fillRect(mm(b.x)-s/2, mm(b.z)-s/2, s, s);
+  }
+  // caravans + raiders
+  g.fillStyle = '#e8dcc2';
+  for (const c of state.caravans) g.fillRect(mm(c.x)-1.5, mm(c.z)-1.5, 3, 3);
+  g.fillStyle = '#ff4030';
+  for (const bd of state.bandits) { g.beginPath(); g.arc(mm(bd.x), mm(bd.z), 2, 0, Math.PI*2); g.fill(); }
+  // camera target
+  g.strokeStyle = '#d9a44a'; g.lineWidth = 1;
+  g.strokeRect(mm(camTarget.x)-4, mm(camTarget.z)-4, 8, 8);
+}
+mmapEl.addEventListener('pointerdown', e => {
+  const r = mmapEl.getBoundingClientRect();
+  camTarget.x = Math.max(-MAP, Math.min(MAP, ((e.clientX - r.left) / r.width) * MMAP_EXT*2 - MMAP_EXT));
+  camTarget.z = Math.max(-MAP, Math.min(MAP, ((e.clientY - r.top) / r.height) * MMAP_EXT*2 - MMAP_EXT));
+  e.stopPropagation();
+});
 // consume ALL elapsed real time in fixed substeps so throttled RAF (hidden or
 // occluded tab) never slows the simulation — clamped to 1s to avoid spirals
+let gameSpeed = 1, gamePaused = false;
+function setSpeed(n) {
+  if (n === 0) gamePaused = !gamePaused;
+  else { gameSpeed = n; gamePaused = false; }
+  document.querySelectorAll('#speedctl button').forEach(b => {
+    const v = +b.dataset.spd;
+    b.classList.toggle('on', v === 0 ? gamePaused : (!gamePaused && v === gameSpeed));
+  });
+  AudioSys.play('click');
+}
+document.querySelectorAll('#speedctl button').forEach(b => { b.onclick = () => setSpeed(+b.dataset.spd); });
 function advance(now) {
-  let elapsed = Math.min(1.0, (now - last) / 1000);
+  let elapsed = Math.min(1.0, (now - last) / 1000) * (gamePaused ? 0 : gameSpeed);
   last = now;
   autosaveT += elapsed;
   while (elapsed > 0) { const h = Math.min(0.05, elapsed); step(h); elapsed -= h; }

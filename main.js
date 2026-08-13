@@ -29,9 +29,16 @@ const TOOL_ORDER = ['wall','gate','house','well','farm','woodcutter','quarry','m
 const GATE_COST = 10; // stone, for the Gate tool
 
 // ---------------------------------------------------------------- state
+const RANKS = [
+  { pop: 0,  nm: 'Hamlet',  unlocks: ['wall','gate','house','farm','woodcutter','demolish'] },
+  { pop: 12, nm: 'Village', unlocks: ['well','quarry'] },
+  { pop: 20, nm: 'Town',    unlocks: ['market','tower'] },
+  { pop: 32, nm: 'City',    unlocks: ['barracks'] },
+];
+
 const state = {
-  gold:100, wood:120, stone:140, food:60,
-  pop:6, time:0, day:1,
+  gold:100, wood:120, stone:155, food:60,
+  pop:6, maxPop:6, rankIdx:0, time:0, day:1,
   buildings:[],       // {type,x,z,hp,maxHp,depth,ruined,group,hitFlash}
   walls:[],           // {poly, path, closed, gates, group}
   bandits:[], guards:[], arrows:[], villagers:[], caravans:[],
@@ -1028,6 +1035,8 @@ function countNear(list, x, z, r) {
 function placementCheck(type, x, z) {
   const def = BUILD_DEFS[type];
   if (Math.abs(x) > MAP || Math.abs(z) > MAP) return { ok:false, why:'Beyond the town lands' };
+  const lockRank = toolLocked(type);
+  if (lockRank) return { ok:false, why:`${def.nm}s unlock at ${lockRank.pop} folk` };
   if (def.needsWard && wardDepth(x, z) === 0) return { ok:false, why:`A ${def.nm.toLowerCase()} must stand inside walls — raise the ward first` };
   if (overlapsBuilding(x, z, def.w, def.d)) return { ok:false, why:'Blocked by a building' };
   if (nearWall(x, z, Math.max(def.w, def.d)/2 + 1.2)) return { ok:false, why:'Too close to a wall' };
@@ -1214,7 +1223,23 @@ function tryCloseWall() {
   saveGame();
 }
 
+function refreshPaletteLocks() {
+  document.querySelectorAll('.tool').forEach(el => {
+    const t = el.dataset.t;
+    const lockRank = toolLocked(t);
+    el.classList.toggle('locked', !!lockRank);
+    const costEl = el.querySelector('.cost');
+    if (lockRank) costEl.innerHTML = `🔒 ${lockRank.pop} folk`;
+    else if (t === 'wall') costEl.innerHTML = `🪨${WALL_COST_PER_UNIT}/step`;
+    else if (t === 'gate') costEl.innerHTML = `🪨${GATE_COST}`;
+    else if (t === 'demolish') costEl.innerHTML = 'refund ½';
+    else costEl.innerHTML = costStr(BUILD_DEFS[t].cost);
+  });
+}
+
 function setTool(t) {
+  const lockRank = t && toolLocked(t);
+  if (lockRank) { msg(`${BUILD_DEFS[t] ? BUILD_DEFS[t].nm + 's' : 'That'} unlock at ${lockRank.pop} folk (${lockRank.nm}).`, 'warn'); return; }
   if (tool === 'wall' && t !== 'wall') { wallDraft = []; startAttach = null; redrawWallPreview(); }
   tool = (tool === t) ? null : t;
   if (ghost) { scene.remove(ghost); ghost = null; }
@@ -1312,6 +1337,11 @@ function costStr(cost) {
       }
       el.title = `Hotkey ${key}`;
       el.onclick = () => setTool(t);
+      const lockRank = toolLocked(t);
+      if (lockRank) {
+        el.classList.add('locked');
+        el.querySelector('.cost').innerHTML = `🔒 ${lockRank.pop} folk`;
+      }
       row.appendChild(el);
     }
     gEl.appendChild(row);
@@ -1326,7 +1356,7 @@ function updateHUD() {
   $('r-stone').textContent = fmt(state.stone);
   $('r-food').textContent = fmt(state.food);
   $('r-pop').textContent = `${fmt(state.pop)}/${popCap()}`;
-  $('daycount').textContent = `Day ${state.day}`;
+  $('daycount').textContent = `${RANKS[state.rankIdx].nm} · Day ${state.day}`;
   const warn = $('raidwarn');
   if (!state.over && state.raidTimer < 15) {
     warn.style.display = 'inline';
@@ -1359,6 +1389,27 @@ function foodRate() { // per day
 }
 function coveredBy(b, type, r) {
   return state.buildings.some(o => !o.ruined && o.type === type && Math.hypot(o.x-b.x, o.z-b.z) <= r);
+}
+
+// population ranks — growth unlocks the deeper toolbox (high-water: never re-locks)
+function toolLocked(t) {
+  for (let i = state.rankIdx + 1; i < RANKS.length; i++)
+    if (RANKS[i].unlocks.includes(t)) return RANKS[i];
+  return null;
+}
+function rankTick() {
+  state.maxPop = Math.max(state.maxPop || 0, state.pop);
+  let idx = 0;
+  for (let i = 0; i < RANKS.length; i++) if (state.maxPop >= RANKS[i].pop) idx = i;
+  if (idx > state.rankIdx) {
+    state.rankIdx = idx;
+    const r = RANKS[idx];
+    const names = r.unlocks.map(t => BUILD_DEFS[t] ? BUILD_DEFS[t].nm : t).join(', ');
+    msg(`The settlement is now a ${r.nm.toUpperCase()}! Unlocked: ${names}.`, 'good');
+    AudioSys.play('chime');
+    refreshPaletteLocks();
+    saveGame();
+  }
 }
 
 // houses in well-planned wards grow into townhouses — density is the reward
@@ -1935,7 +1986,7 @@ function saveGame(key = 'bulwark-save') {
   try {
     localStorage.setItem(key, JSON.stringify({
       gold:state.gold, wood:state.wood, stone:state.stone, food:state.food,
-      pop:state.pop, time:state.time, raidNum:state.raidNum,
+      pop:state.pop, maxPop:state.maxPop, rankIdx:state.rankIdx, time:state.time, raidNum:state.raidNum,
       buildings: state.buildings.map(b => ({ type:b.type, x:b.x, z:b.z, hp:b.hp, ruined:b.ruined })),
       walls: state.walls.map(w => ({ poly:w.poly, path:w.path, closed:w.closed,
         gates: w.gates.map(g => ({ seg:g.seg, t:g.t })) })),   // strip runtime door refs
@@ -1948,6 +1999,17 @@ function loadGame() {
   if (!s) return false;
   Object.assign(state, { gold:s.gold, wood:s.wood, stone:s.stone, food:s.food, pop:s.pop, time:s.time, raidNum:s.raidNum||0 });
   state.day = Math.floor(s.time / DAY) + 1;
+  // rank: stored high-water mark, grandfathering legacy saves by what they built
+  let mp = s.maxPop ?? s.pop;
+  for (const b of s.buildings) {
+    if (b.type === 'well' || b.type === 'quarry') mp = Math.max(mp, 12);
+    if (b.type === 'market' || b.type === 'tower' || b.type === 'townhouse') mp = Math.max(mp, 20);
+    if (b.type === 'barracks') mp = Math.max(mp, 32);
+  }
+  state.maxPop = mp;
+  state.rankIdx = 0;
+  for (let i = 0; i < RANKS.length; i++) if (mp >= RANKS[i].pop) state.rankIdx = i;
+  refreshPaletteLocks();
   for (const w of s.walls) {
     const path = w.path || w.verts, poly = w.poly || w.verts;   // legacy saves used {verts}
     const closed = w.closed !== undefined ? w.closed : true;
@@ -2014,6 +2076,7 @@ function step(dt) {
   upgradeTick(dt);
   fireTick(dt);
   caravanTick(dt);
+  rankTick();
   // walk-cycle pass: reads the _moved flags the ticks above just set
   const figures = [...state.bandits, ...state.guards, ...state.villagers];
   for (const w of state.walls) if (w.sentries) figures.push(...w.sentries);

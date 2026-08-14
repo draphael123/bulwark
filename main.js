@@ -151,6 +151,7 @@ function updateAtmosphere() {
   }
   nightFactor = Math.max(0, Math.min(1, 1 - (sun.intensity - 0.3) / 1.0));
   MAT.window.opacity = nightFactor * 0.95;
+  MAT.windowGlow.opacity = nightFactor * 0.3;
   if (starPts) starPts.material.opacity = nightFactor * 0.9;
   sunSpr.position.set(sun.position.x*3.6, Math.max(50, sun.position.y*3.2), sun.position.z*3.6);
   sunSpr.material.opacity = (1 - nightFactor) * 0.8;
@@ -216,6 +217,21 @@ wearMesh.position.y = 0.03;
 wearMesh.renderOrder = 1;
 scene.add(wearMesh);
 let wearDirty = false, wearUp = 0;
+// soft dark blob that seats a building into the land
+function stampFoundation(x, z, w, d) {
+  if (Math.abs(x) > WEAR_EXTENT || Math.abs(z) > WEAR_EXTENT) return;
+  const u = (x + WEAR_EXTENT) / (WEAR_EXTENT*2) * WEAR_SIZE;
+  const v = (z + WEAR_EXTENT) / (WEAR_EXTENT*2) * WEAR_SIZE;
+  const rw = (w/2 + 1.0) / (WEAR_EXTENT*2) * WEAR_SIZE;
+  const rh = (d/2 + 1.0) / (WEAR_EXTENT*2) * WEAR_SIZE;
+  wearCtx.globalAlpha = 0.15;
+  wearCtx.fillStyle = '#3a3226';
+  wearCtx.beginPath();
+  wearCtx.ellipse(u, v, rw, rh, 0, 0, Math.PI*2);
+  wearCtx.fill();
+  wearCtx.globalAlpha = 1;
+  wearDirty = true;
+}
 function stampWear(x, z, r = 0.8, alpha = 0.05) {
   if (Math.abs(x) > WEAR_EXTENT || Math.abs(z) > WEAR_EXTENT) return;
   const u = (x + WEAR_EXTENT) / (WEAR_EXTENT*2) * WEAR_SIZE;
@@ -228,14 +244,16 @@ function stampWear(x, z, r = 0.8, alpha = 0.05) {
   wearDirty = true;
 }
 
-// lake water
-{
-  const water = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r, 28),
-    new THREE.MeshLambertMaterial({ color:0x3d6f8e, transparent:true, opacity:0.92 }));
-  water.rotation.x = -Math.PI/2;
-  water.position.set(LAKE.x, -0.5, LAKE.z);
-  scene.add(water);
-}
+// lake water (gently rippling)
+const lakeWater = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r, 28),
+  new THREE.MeshLambertMaterial({ color:0x3d6f8e, transparent:true, opacity:0.92 }));
+lakeWater.rotation.x = -Math.PI/2;
+lakeWater.position.set(LAKE.x, -0.5, LAKE.z);
+scene.add(lakeWater);
+
+// one pooled flickering light serves whichever building burns
+const fireLight = new THREE.PointLight(0xff7a30, 0, 26, 1.8);
+scene.add(fireLight);
 
 // distant mountains with snow caps
 {
@@ -437,14 +455,87 @@ function scatterWorld(seed, cfg) {
 }
 scatterWorld(REGIONS[0].seed);   // title-screen backdrop
 
+// ---------------------------------------------------------------- baked surface textures
+// deterministic canvas bakes (no RNG) — stone coursing, stucco, shingles
+function bakeTexture(w, h, draw) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function shadeHex(hex, d) {
+  const r = Math.max(0, Math.min(255, ((hex>>16)&255) + d));
+  const g = Math.max(0, Math.min(255, ((hex>>8)&255) + d));
+  const b = Math.max(0, Math.min(255, (hex&255) + d));
+  return `rgb(${r},${g},${b})`;
+}
+function stoneTexture(base, mortar) {
+  return bakeTexture(128, 128, (g) => {
+    g.fillStyle = shadeHex(mortar, 0); g.fillRect(0, 0, 128, 128);
+    let y = 0, row = 0;
+    while (y < 128) {
+      const hh = 16 + (row % 3) * 4;
+      let x = -((row * 17) % 24);
+      while (x < 128) {
+        const ww = 24 + ((x * 7 + row * 13) & 15);
+        g.fillStyle = shadeHex(base, ((x * 31 + y * 17) % 25) - 12);
+        g.fillRect(x + 1.5, y + 1.5, ww - 3, hh - 3);
+        x += ww;
+      }
+      y += hh; row++;
+    }
+    // weathering speckle
+    for (let i = 0; i < 500; i++) {
+      const sx = (i * 61) % 128, sy = (i * 97) % 128;
+      g.fillStyle = shadeHex(base, ((i * 41) % 2) ? -18 : 14);
+      g.globalAlpha = 0.25;
+      g.fillRect(sx, sy, 2, 2);
+      g.globalAlpha = 1;
+    }
+  });
+}
+function stuccoTexture(base) {
+  return bakeTexture(64, 64, (g) => {
+    g.fillStyle = shadeHex(base, 0); g.fillRect(0, 0, 64, 64);
+    for (let i = 0; i < 900; i++) {
+      const sx = (i * 37) % 64, sy = (i * 53) % 64;
+      g.fillStyle = shadeHex(base, ((i * 29) % 17) - 8);
+      g.fillRect(sx, sy, 1.6, 1.6);
+    }
+  });
+}
+function shingleTexture(base) {
+  return bakeTexture(64, 64, (g) => {
+    g.fillStyle = shadeHex(base, -22); g.fillRect(0, 0, 64, 64);
+    for (let y = 0; y < 64; y += 8) {
+      const off = ((y / 8) % 2) * 8;
+      for (let x = -8; x < 64; x += 16) {
+        g.fillStyle = shadeHex(base, (((x + y) * 13) % 19) - 9);
+        g.fillRect(x + off + 0.8, y + 0.8, 14.4, 6.6);
+      }
+    }
+  });
+}
+const TEX = {
+  stone: stoneTexture(0x9b978c, 0x726e64),
+  stoneD: stoneTexture(0x7c786e, 0x5a564e),
+  plaster: stuccoTexture(0xd9c9a8),
+  roof: shingleTexture(0xa2522f),
+  roofD: shingleTexture(0x7a3b26),
+  roofB: shingleTexture(0x5f6f86),
+};
+
 // ---------------------------------------------------------------- mesh builders
 const MAT = {
-  plaster: new THREE.MeshLambertMaterial({ color:0xd9c9a8 }),
+  plaster: new THREE.MeshLambertMaterial({ color:0xffffff, map:TEX.plaster }),
   timber:  new THREE.MeshLambertMaterial({ color:0x6e4a2a }),
-  roof:    new THREE.MeshLambertMaterial({ color:0xa2522f }),
-  roofB:   new THREE.MeshLambertMaterial({ color:0x5f6f86 }),
-  stone:   new THREE.MeshLambertMaterial({ color:0x9b978c }),
-  stoneD:  new THREE.MeshLambertMaterial({ color:0x7c786e }),
+  roof:    new THREE.MeshLambertMaterial({ color:0xffffff, map:TEX.roof }),
+  roofB:   new THREE.MeshLambertMaterial({ color:0xffffff, map:TEX.roofB }),
+  stone:   new THREE.MeshLambertMaterial({ color:0xffffff, map:TEX.stone }),
+  stoneD:  new THREE.MeshLambertMaterial({ color:0xffffff, map:TEX.stoneD }),
   soil:    new THREE.MeshLambertMaterial({ color:0x6b4f30 }),
   crop:    new THREE.MeshLambertMaterial({ color:0xb5a33c }),
   canopy:  new THREE.MeshLambertMaterial({ color:0xa23a3a }),
@@ -453,9 +544,11 @@ const MAT = {
   // shared window material — opacity driven by nightFactor so every window in
   // town lights up together at dusk
   window:  new THREE.MeshBasicMaterial({ color:0xffc966, transparent:true, opacity:0, depthWrite:false }),
-  roofD:   new THREE.MeshLambertMaterial({ color:0x7a3b26 }),
+  roofD:   new THREE.MeshLambertMaterial({ color:0xffffff, map:TEX.roofD }),
   // rank banner: recolored as the settlement grows
   rankBanner: new THREE.MeshLambertMaterial({ color:0xd9a44a }),
+  // shared night-glow sprite material — one opacity knob lights every window
+  windowGlow: new THREE.SpriteMaterial({ color:0xffb84a, transparent:true, opacity:0, depthWrite:false, blending:THREE.AdditiveBlending }),
 };
 const SHARED_MATS = new Set(Object.values(MAT));
 
@@ -503,10 +596,21 @@ function buildMesh(type, bx = 0, bz = 0) {
     roof.position.y = 2.0; roof.castShadow = true; g.add(roof);
     g.add(box(0.5, 1.0, 0.5, MAT.stoneD, vh > 0.5 ? 0.9 : -0.9, 3.0, 0.6)); // chimney
     g.rotation.y = ((vh*16)|0) % 4 * Math.PI/2;
+    // timber framing: corner posts + top rail
+    for (const [px, pz] of [[-1.3,-1.3],[1.3,-1.3],[-1.3,1.3],[1.3,1.3]])
+      g.add(box(0.15, 2.0, 0.15, MAT.timber, px, 1.0, pz));
+    for (const s of [-1, 1]) {
+      g.add(box(2.85, 0.13, 0.15, MAT.timber, 0, 1.95, s*1.3));
+      g.add(box(0.15, 0.13, 2.85, MAT.timber, s*1.3, 1.95, 0));
+    }
     for (const [wx, wz, ry] of [[-0.7, 1.36, 0], [0.7, 1.36, 0], [1.36, 0.4, Math.PI/2]]) {
       const win = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.55), MAT.window);
       win.position.set(ry ? wz : wx, 1.15, ry ? wx : wz);
       win.rotation.y = ry; g.add(win);
+      const glow = new THREE.Sprite(MAT.windowGlow);
+      glow.scale.setScalar(1.4);
+      glow.position.copy(win.position);
+      g.add(glow);
     }
   } else if (type === 'townhouse') {
     // jettied two-story townhouse — the dense-ward upgrade
@@ -522,6 +626,10 @@ function buildMesh(type, bx = 0, bz = 0) {
         const win = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.52), MAT.window);
         win.position.set(wx, yy, yy > 2 ? 1.47 : 1.32);
         g.add(win);
+        const glow = new THREE.Sprite(MAT.windowGlow);
+        glow.scale.setScalar(1.3);
+        glow.position.copy(win.position);
+        g.add(glow);
       }
     }
   } else if (type === 'well') {
@@ -567,12 +675,16 @@ function buildMesh(type, bx = 0, bz = 0) {
     g.add(cyl(1.1, 1.35, 7.0, MAT.stone, 0, 3.5, 0, 8));
     g.add(cyl(1.5, 1.5, 0.7, MAT.stoneD, 0, 7.3, 0, 8));
     g.add(cone(1.5, 1.9, MAT.roofB, 0, 8.6, 0, 8));
-    const b = box(0.06, 1.0, 0.7, MAT.banner, 1.45, 6.4, 0); g.add(b);
+    const b = box(0.06, 1.0, 0.7, MAT.rankBanner, 1.45, 6.4, 0);
+    b.userData.isFlag = true;
+    g.add(b);
   } else if (type === 'barracks') {
     g.add(box(3.8, 2.2, 2.6, MAT.stoneD, 0, 1.1, 0));
     const r = new THREE.Mesh(prismGeo(4.2, 1.3, 3.0), MAT.roofB); r.position.y = 2.2; r.castShadow=true; g.add(r);
     g.add(cyl(0.09, 0.09, 3.6, MAT.timber, 1.6, 1.8, 1.2, 6));
-    g.add(box(0.06, 0.9, 0.65, MAT.banner, 1.6, 3.1, 1.55));
+    const bf = box(0.06, 0.9, 0.65, MAT.banner, 1.6, 3.1, 1.55);
+    bf.userData.isFlag = true;
+    g.add(bf);
   } else if (type === 'keep') {
     g.add(box(4.6, 4.4, 4.6, MAT.stone, 0, 2.2, 0));
     for (const [px,pz] of [[-2.3,-2.3],[2.3,-2.3],[-2.3,2.3],[2.3,2.3]]) {
@@ -580,11 +692,17 @@ function buildMesh(type, bx = 0, bz = 0) {
       g.add(cone(1.1, 1.6, MAT.roofB, px, 6.4, pz, 8));
     }
     g.add(cyl(0.08, 0.08, 3.0, MAT.timber, 0, 6.0, 0, 6));
-    g.add(box(0.06, 1.0, 1.4, MAT.rankBanner, 0, 7.0, 0.7));
+    const kf = box(0.06, 1.0, 1.4, MAT.rankBanner, 0, 7.0, 0.7);
+    kf.userData.isFlag = true;
+    g.add(kf);
     for (const ry of [0, Math.PI/2, Math.PI, -Math.PI/2]) {
       const win = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.8), MAT.window);
       win.position.set(Math.sin(ry)*2.32, 3.1, Math.cos(ry)*2.32);
       win.rotation.y = ry; g.add(win);
+      const glow = new THREE.Sprite(MAT.windowGlow);
+      glow.scale.setScalar(1.6);
+      glow.position.copy(win.position);
+      g.add(glow);
     }
   }
   return g;
@@ -601,6 +719,8 @@ function softDiscTexture() {
   return new THREE.CanvasTexture(c);
 }
 const P_TEX = softDiscTexture();
+MAT.windowGlow.map = P_TEX;
+MAT.windowGlow.needsUpdate = true;
 const particles = [], P_CAP = 160;
 function spawnP(x, y, z, opt) {
   let p = particles.find(q => !q.alive);
@@ -1052,6 +1172,9 @@ function buildWallMeshes(verts, closed=true, gates=null) {
       blockers.push({ ax:b0.x, az:b0.z, bx:b1.x, bz:b1.z });
       const p = along((s0+s1)/2);
       const w = box(WALL_T, WALL_H, w2, MAT.stone, p.x, WALL_H/2, p.z);
+      // scale UVs by span size so the stone coursing doesn't stretch
+      const uv = w.geometry.attributes.uv;
+      for (let k=0;k<uv.count;k++) uv.setXY(k, uv.getX(k) * Math.max(1, w2/4), uv.getY(k) * (WALL_H/4));
       w.rotation.y = ang; group.add(w);
       const cnt = Math.floor(w2/2.2);
       for (let k=0;k<cnt;k++){
@@ -1210,9 +1333,11 @@ function placeBuilding(type, x, z, free=false) {
   const b = { type, x, z, hp:def.hp, maxHp:def.hp, depth:wardDepth(x,z), ruined:false, group, hitFlash:0,
     buildT: free ? 1 : 0, burnT: 0, smolderT: 0 };
   if (!free) { dustBurst(x, z, Math.max(def.w, def.d)/2 + 0.5, 10); group.scale.setScalar(0.25); AudioSys.play('thunk'); }
-  group.traverse(o => { o.userData.b = b; });
+  b._flags = [];
+  group.traverse(o => { o.userData.b = b; if (o.userData.isFlag) b._flags.push(o); });
   state.buildings.push(b);
   refreshCoverage();
+  stampFoundation(x, z, def.w, def.d);
   return b;
 }
 
@@ -2655,6 +2780,21 @@ function frame(dt) {
   rainVisualTick(dt);
   AudioSys.update(dt, nightFactor, rainFactor);
   updateParticles(dt);
+  // lake ripple
+  {
+    const p = lakeWater.geometry.attributes.position;
+    for (let i=1;i<p.count;i++) p.setZ(i, Math.sin(state.time*1.3 + i*0.85) * 0.09);
+    p.needsUpdate = true;
+  }
+  // fire light follows the nearest blaze
+  {
+    let burning = null;
+    for (const b of state.buildings) if (b.onFire || b.smolderT > 15) { burning = b; break; }
+    if (burning) {
+      fireLight.position.set(burning.x, 3.2, burning.z);
+      fireLight.intensity = 35 + Math.sin(state.time*29)*10 + Math.sin(state.time*67)*6;
+    } else fireLight.intensity = 0;
+  }
   for (const c of clouds) {
     c.position.x += c.userData.speed * dt;
     if (c.position.x > 420) c.position.x = -420;
@@ -2674,6 +2814,9 @@ function frame(dt) {
       b.buildT = Math.min(1, b.buildT + dt);
       const e = 1 - Math.pow(1 - b.buildT, 3);
       b.group.scale.set(0.3+0.7*e, 0.15+0.85*e, 0.3+0.7*e);
+    }
+    if (b._flags && !b.ruined) {
+      for (const f of b._flags) f.rotation.x = Math.sin(state.time*2.3 + b.x*0.7) * 0.12;
     }
     if (b.burnT > 0) {
       b.burnT -= dt;

@@ -30,8 +30,10 @@ const BUILD_DEFS = {
   sawmill:    { nm:'Sawmill',    w:3,  d:3,  hp:70,  cost:{wood:30, gold:10},   auraR:16 },
   quarry:     { nm:'Quarry',     w:4,  d:4,  hp:80,  cost:{wood:25, gold:15},   stonePerDay:8, needsRocks:2 },
   tradepost:  { nm:'Trade Post', w:3,  d:3,  hp:60,  cost:{wood:25, gold:20} },
+  stakes:     { nm:'Stakes',     w:2,  d:2,  hp:30,  cost:{wood:8},             stakeDps:6 },
   watchpost:  { nm:'Watch Post', w:2,  d:2,  hp:70,  cost:{wood:15, stone:10},  range:14, dps:6 },
-  tower:      { nm:'Watchtower', w:2,  d:2,  hp:120, cost:{wood:20, stone:30},  range:24, dps:11 },
+  tower:      { nm:'Arrow Tower',w:2,  d:2,  hp:120, cost:{wood:20, stone:30},  range:24, dps:11 },
+  ballista:   { nm:'Ballista',   w:3,  d:3,  hp:100, cost:{wood:50, gold:40},   range:34, boltDmg:60, boltCd:4.5 },
   barracks:   { nm:'Barracks',   w:4,  d:4,  hp:120, cost:{wood:40, stone:30, gold:50}, guards:3 },
   garden:     { nm:'Garden',     w:2,  d:2,  hp:30,  cost:{wood:10, gold:5},    needsWard:true },
   fountain:   { nm:'Fountain',   w:2,  d:2,  hp:60,  cost:{stone:20, gold:15},  boostR:10, needsWard:true },
@@ -45,7 +47,7 @@ const TABS = [
   { id:'roadTab',  nm:'ROADS',  tools:['dirtroad','road','flagroad'] },
   { id:'townTab',  nm:'TOWN',   tools:['hovel','house','well','granary','greatstore','market','tavern','chapel'] },
   { id:'workTab',  nm:'WORKS',  tools:['farm','mill','woodcutter','sawmill','quarry','tradepost'] },
-  { id:'guardTab', nm:'GUARD',  tools:['watchpost','tower','barracks'] },
+  { id:'guardTab', nm:'GUARD',  tools:['stakes','watchpost','hoardings','moat','tower','ballista','barracks'] },
   { id:'decorTab', nm:'DECOR',  tools:['garden','fountain','bannerpole','statue'] },
 ];
 const WALL_TIERS = {
@@ -62,20 +64,30 @@ const ROAD_TIERS = {
   dirtroad: { nm:'Dirt Path',  res:'wood',  cost:0.2, speed:1.2,  color:'#7a5c38' },
   road:     { nm:'Cobbles',    res:'stone', cost:0.5, speed:1.35, color:'#8f897b' },
   flagroad: { nm:'Flagstones', res:'stone', cost:1.0, speed:1.5,  color:'#a8a294', frontage:true },
+  moat:     { nm:'Moat',       res:'gold',  cost:1.0, speed:0.45, color:'#3d5a6e', moat:true },
+};
+const HOARDING_COST = 20;   // wood, per wall — its sentries take up bows
+// raider archetypes — defense finally has something to choose against
+const RAIDER_KINDS = {
+  raider: { hp:35,  dps:7,  spMin:5.5, spMax:6.5, color:0x5c2a20, scale:1.0 },
+  runner: { hp:20,  dps:5,  spMin:8.5, spMax:9.5, color:0x7a4a20, scale:0.9 },
+  brute:  { hp:120, dps:18, spMin:3.2, spMax:3.8, color:0x3a1f18, scale:1.3 },
+  torch:  { hp:25,  dps:4,  spMin:6.0, spMax:7.0, color:0x6a3a4a, scale:1.0 },
 };
 const isWallTool = t => !!WALL_TIERS[t];
 const isGateTool = t => !!GATE_TIERS[t];
 const isRoadTool = t => !!ROAD_TIERS[t];
 const TOOL_NAME = t => (BUILD_DEFS[t] && BUILD_DEFS[t].nm) || (WALL_TIERS[t] && WALL_TIERS[t].nm)
-  || (GATE_TIERS[t] && GATE_TIERS[t].nm) || (ROAD_TIERS[t] && ROAD_TIERS[t].nm) || t;
+  || (GATE_TIERS[t] && GATE_TIERS[t].nm) || (ROAD_TIERS[t] && ROAD_TIERS[t].nm)
+  || (t === 'hoardings' ? 'Hoardings' : t);
 const GATE_COST = 10; // stone, for the Gate tool
 
 // ---------------------------------------------------------------- state
 const RANKS = [
   { pop: 0,  nm: 'Hamlet',  unlocks: ['palisade','wall','woodgate','dirtroad','road','hovel','house','farm','woodcutter','demolish'] },
-  { pop: 12, nm: 'Village', unlocks: ['gate','well','granary','quarry','mill','sawmill','tavern','watchpost'] },
-  { pop: 20, nm: 'Town',    unlocks: ['highwall','flagroad','market','chapel','tower','tradepost','fountain','garden'] },
-  { pop: 32, nm: 'City',    unlocks: ['greatgate','greatstore','barracks','statue','bannerpole'] },
+  { pop: 12, nm: 'Village', unlocks: ['gate','well','granary','quarry','mill','sawmill','tavern','watchpost','stakes'] },
+  { pop: 20, nm: 'Town',    unlocks: ['highwall','flagroad','market','chapel','tower','tradepost','fountain','garden','hoardings','moat'] },
+  { pop: 32, nm: 'City',    unlocks: ['greatgate','greatstore','barracks','statue','bannerpole','ballista'] },
 ];
 
 // the year turns: 3 days a season, 12-day years. Farms follow the sun.
@@ -109,7 +121,7 @@ const state = {
   townName:'', pop:6, maxPop:6, rankIdx:0, time:0, day:1,
   buildings:[],       // {type,x,z,hp,maxHp,depth,ruined,group,hitFlash}
   walls:[],           // {poly, path, closed, gates, group}
-  bandits:[], guards:[], arrows:[], villagers:[], caravans:[], roads:[],
+  bandits:[], guards:[], arrows:[], villagers:[], caravans:[], critters:[], roads:[],
   difficulty:'standard',
   fireCool:150, caravanT:45, upgCool:0,
   raidTimer:150, raidEdge:null, raidNum:0,
@@ -694,21 +706,48 @@ function buildMesh(type, bx = 0, bz = 0) {
   // deterministic per-plot variety: same spot always builds the same house
   const vh = Math.abs(Math.sin(bx*12.9898 + bz*78.233) * 43758.5453) % 1;
   if (type === 'house') {
-    g.add(box(2.7, 2.0, 2.7, MAT.plaster, 0, 1.0, 0));
-    const roof = new THREE.Mesh(prismGeo(3.1, 1.5, 3.1), [MAT.roof, MAT.roofD, MAT.roofB][(vh*3)|0]);
-    roof.position.y = 2.0; roof.castShadow = true; g.add(roof);
-    g.add(box(0.5, 1.0, 0.5, MAT.stoneD, vh > 0.5 ? 0.9 : -0.9, 3.0, 0.6)); // chimney
-    g.rotation.y = ((vh*16)|0) % 4 * Math.PI/2;
-    // timber framing: corner posts + top rail
-    for (const [px, pz] of [[-1.3,-1.3],[1.3,-1.3],[-1.3,1.3],[1.3,1.3]])
-      g.add(box(0.15, 2.0, 0.15, MAT.timber, px, 1.0, pz));
-    for (const s of [-1, 1]) {
-      g.add(box(2.85, 0.13, 0.15, MAT.timber, 0, 1.95, s*1.3));
-      g.add(box(0.15, 0.13, 2.85, MAT.timber, s*1.3, 1.95, 0));
+    const roofM = [MAT.roof, MAT.roofD, MAT.roofB][(vh*3)|0];
+    const variant = ((vh*7)|0) % 3;
+    if (variant === 1) {
+      // tall narrow burgher house
+      g.add(box(2.2, 2.6, 2.4, MAT.plaster, 0, 1.3, 0));
+      const roof = new THREE.Mesh(prismGeo(2.6, 1.7, 2.8), roofM);
+      roof.position.y = 2.6; roof.castShadow = true; g.add(roof);
+      g.add(box(0.45, 0.9, 0.45, MAT.stoneD, vh > 0.5 ? 0.7 : -0.7, 3.6, 0.5));
+      for (const [px, pz] of [[-1.05,-1.15],[1.05,-1.15],[-1.05,1.15],[1.05,1.15]])
+        g.add(box(0.14, 2.6, 0.14, MAT.timber, px, 1.3, pz));
+      g.add(box(2.3, 0.12, 0.14, MAT.timber, 0, 1.3, 1.18));
+    } else if (variant === 2) {
+      // L-shaped cottage with a low wing
+      g.add(box(2.6, 1.9, 1.7, MAT.plaster, -0.1, 0.95, -0.55));
+      const roofA = new THREE.Mesh(prismGeo(3.0, 1.3, 2.1), roofM);
+      roofA.position.set(-0.1, 1.9, -0.55); roofA.castShadow = true; g.add(roofA);
+      g.add(box(1.4, 1.5, 1.5, MAT.timber, 0.6, 0.75, 0.7));
+      const roofB2 = new THREE.Mesh(prismGeo(1.8, 0.9, 1.9), roofM);
+      roofB2.position.set(0.6, 1.5, 0.7); roofB2.castShadow = true; g.add(roofB2);
+      g.add(box(0.45, 0.9, 0.45, MAT.stoneD, -1.0, 2.7, -0.5));
+    } else {
+      g.add(box(2.7, 2.0, 2.7, MAT.plaster, 0, 1.0, 0));
+      const roof = new THREE.Mesh(prismGeo(3.1, 1.5, 3.1), roofM);
+      roof.position.y = 2.0; roof.castShadow = true; g.add(roof);
+      g.add(box(0.5, 1.0, 0.5, MAT.stoneD, vh > 0.5 ? 0.9 : -0.9, 3.0, 0.6));
+      for (const [px, pz] of [[-1.3,-1.3],[1.3,-1.3],[-1.3,1.3],[1.3,1.3]])
+        g.add(box(0.15, 2.0, 0.15, MAT.timber, px, 1.0, pz));
+      for (const s of [-1, 1]) {
+        g.add(box(2.85, 0.13, 0.15, MAT.timber, 0, 1.95, s*1.3));
+        g.add(box(0.15, 0.13, 2.85, MAT.timber, s*1.3, 1.95, 0));
+      }
     }
-    for (const [wx, wz, ry] of [[-0.7, 1.36, 0], [0.7, 1.36, 0], [1.36, 0.4, Math.PI/2]]) {
+    // yard clutter: a barrel, crate or bench by the door
+    const propR = (vh*13) % 1;
+    if (propR < 0.33) g.add(cyl(0.26, 0.3, 0.5, MAT.timber, 1.15, 0.25, 1.15, 7));
+    else if (propR < 0.66) g.add(box(0.5, 0.45, 0.5, MAT.timber, -1.15, 0.22, 1.15));
+    else { g.add(box(0.8, 0.1, 0.3, MAT.timber, 1.05, 0.35, 1.2)); g.add(box(0.08, 0.3, 0.25, MAT.timber, 0.75, 0.15, 1.2)); g.add(box(0.08, 0.3, 0.25, MAT.timber, 1.35, 0.15, 1.2)); }
+    g.rotation.y = ((vh*16)|0) % 4 * Math.PI/2;
+    g.rotation.z = (vh - 0.5) * 0.02;   // a little honest lean
+    for (const [wx, wz, ry] of [[-0.7, 1.3, 0], [0.7, 1.3, 0]]) {
       const win = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.55), MAT.window);
-      win.position.set(ry ? wz : wx, 1.15, ry ? wx : wz);
+      win.position.set(wx, 1.15, wz);
       win.rotation.y = ry; g.add(win);
       const glow = new THREE.Sprite(MAT.windowGlow);
       glow.scale.setScalar(1.4);
@@ -829,6 +868,21 @@ function buildMesh(type, bx = 0, bz = 0) {
     g.add(cyl(0.07, 0.07, 2.6, MAT.timber, 1.5, 1.3, -1.0, 5));
     const fl = box(0.05, 0.5, 0.8, MAT.banner, 1.5, 2.4, -0.6);
     fl.userData.isFlag = true; g.add(fl);
+  } else if (type === 'stakes') {
+    for (const [px, pz, tilt] of [[-0.6,-0.5,0.5],[0.3,-0.6,-0.4],[0.7,0.3,0.5],[-0.3,0.6,-0.5],[0,0,0.2]]) {
+      const st = cyl(0.02, 0.12, 1.5, MAT.timber, px, 0.6, pz, 5);
+      st.rotation.z = tilt; st.rotation.x = tilt * 0.6;
+      g.add(st);
+    }
+    g.add(box(1.9, 0.14, 1.9, MAT.soil, 0, 0.07, 0));
+  } else if (type === 'ballista') {
+    g.add(box(2.6, 0.5, 2.6, MAT.timber, 0, 0.25, 0));
+    g.add(cyl(0.5, 0.65, 1.0, MAT.stoneD, 0, 1.0, 0, 8));
+    const arm = box(0.25, 0.25, 2.6, MAT.timber, 0, 1.7, 0);
+    arm.rotation.x = -0.35; g.add(arm);
+    const bow = box(2.4, 0.18, 0.18, MAT.timber, 0, 1.35, 1.0);
+    g.add(bow);
+    g.add(box(0.08, 0.08, 1.6, MAT.ruin, 0, 1.75, 0.2));
   } else if (type === 'watchpost') {
     for (const [px, pz] of [[-0.7,-0.7],[0.7,-0.7],[-0.7,0.7],[0.7,0.7]])
       g.add(cyl(0.11, 0.13, 3.2, MAT.timber, px, 1.6, pz, 5));
@@ -891,6 +945,10 @@ function buildMesh(type, bx = 0, bz = 0) {
     for (let i=0;i<4;i++) g.add(box(5.0, 0.35, 0.7, MAT.crop, 0, 0.4, -2.1+i*1.4));
     g.add(box(1.6, 1.4, 1.6, MAT.timber, 2.4, 0.7, 2.4));
     const r = new THREE.Mesh(prismGeo(1.9, 0.9, 1.9), MAT.roof); r.position.set(2.4, 1.4, 2.4); r.castShadow=true; g.add(r);
+    // hay bales by the barn
+    const hay = new THREE.MeshLambertMaterial({ color:0xd9c05a });
+    const h1 = cyl(0.45, 0.45, 0.9, hay, -2.3, 0.45, 2.3, 8); h1.rotation.z = Math.PI/2; g.add(h1);
+    const h2 = cyl(0.4, 0.4, 0.8, hay, -2.3, 1.1, 2.3, 8); h2.rotation.z = Math.PI/2; g.add(h2);
   } else if (type === 'woodcutter') {
     g.add(box(2.4, 1.7, 2.4, MAT.timber, -0.3, 0.85, 0));
     const r = new THREE.Mesh(prismGeo(2.8, 1.1, 2.8), MAT.roofB); r.position.set(-0.3, 1.7, 0); r.castShadow=true; g.add(r);
@@ -909,6 +967,10 @@ function buildMesh(type, bx = 0, bz = 0) {
     const r = new THREE.Mesh(prismGeo(4.4, 1.1, 4.4), MAT.canopy); r.position.y = 2.3; r.castShadow=true; g.add(r);
     g.add(box(1.0, 0.7, 0.6, MAT.plaster, -0.7, 0.75, 0.4));
     g.add(box(0.8, 0.5, 0.8, MAT.crop, 0.8, 0.65, -0.5));
+    // crates and a barrel stacked beside the stalls
+    g.add(box(0.6, 0.55, 0.6, MAT.timber, 2.35, 0.28, 1.4));
+    g.add(box(0.5, 0.45, 0.5, MAT.timber, 2.35, 0.78, 1.4));
+    g.add(cyl(0.28, 0.32, 0.55, MAT.timber, -2.35, 0.28, -1.5, 7));
   } else if (type === 'tower') {
     g.add(cyl(1.1, 1.35, 7.0, MAT.stone, 0, 3.5, 0, 8));
     g.add(cyl(1.5, 1.5, 0.7, MAT.stoneD, 0, 7.3, 0, 8));
@@ -1117,6 +1179,16 @@ function makeFigure(bodyColor, role='villager') {
     armR.add(spear);                                              // carried in the right hand
     const shield = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.42, 0.34), mat(0x7a3020));
     shield.position.set(-0.09, -0.3, 0); armL.add(shield);
+  } else if (role === 'monk') {
+    // robe: swap the legs for a long habit
+    legL.visible = legR.visible = false;
+    const habit = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.34, 1.15, 7), bodyM.clone());
+    habit.position.y = 0.55; habit.castShadow = true;
+    g.add(habit);
+    g.add(cone(0.24, 0.32, bodyM.clone(), 0, 1.4, 0, 7));   // hood
+    const cord = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.035, 5, 10), mat(0xc9a86a));
+    cord.rotation.x = Math.PI/2; cord.position.y = 0.85;
+    g.add(cord);
   } else if (role === 'bandit') {
     const hood = cone(0.24, 0.34, darkM.clone(), 0, 1.38, 0, 7);  // dark hood
     g.add(hood);
@@ -1166,6 +1238,83 @@ function makeCaravan() {
   return g;
 }
 
+// critters: chickens scratch about the wards, a dog trails the townsfolk
+function makeChicken() {
+  const g = new THREE.Group();
+  const white = new THREE.MeshLambertMaterial({ color:0xe8e2d4 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 5), white);
+  body.position.y = 0.22; body.scale.set(1, 0.85, 1.25); body.castShadow = true;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 6, 5), white);
+  head.position.set(0, 0.44, 0.2); head.castShadow = true;
+  const comb = box(0.04, 0.09, 0.09, new THREE.MeshLambertMaterial({ color:0xc23b2a }), 0, 0.54, 0.2);
+  const beak = cone(0.04, 0.1, new THREE.MeshLambertMaterial({ color:0xd9a44a }), 0, 0.44, 0.3, 4);
+  beak.rotation.x = Math.PI/2;
+  g.add(body, head, comb, beak);
+  return g;
+}
+function makeDog() {
+  const g = new THREE.Group();
+  const brown = new THREE.MeshLambertMaterial({ color:0x6b4a30 });
+  const body = box(0.26, 0.28, 0.62, brown, 0, 0.34, 0);
+  const head = box(0.22, 0.22, 0.26, brown, 0, 0.52, 0.38);
+  const tail = box(0.06, 0.06, 0.3, brown, 0, 0.48, -0.4);
+  tail.rotation.x = -0.5;
+  for (const [sx, sz] of [[-0.09,0.2],[0.09,0.2],[-0.09,-0.2],[0.09,-0.2]])
+    g.add(box(0.07, 0.24, 0.07, brown, sx, 0.12, sz));
+  g.add(body, head, tail);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+function critterTick(dt) {
+  const wantChickens = Math.min(5, Math.floor(state.pop / 6));
+  const wantDogs = state.pop >= 10 ? 1 : 0;
+  const chickens = state.critters.filter(c => c.kind === 'chicken');
+  const dogs = state.critters.filter(c => c.kind === 'dog');
+  const homes = state.buildings.filter(b => !b.ruined && b.depth > 0);
+  if (chickens.length < wantChickens && homes.length) {
+    const h = homes[Math.random()*homes.length|0];
+    const grp = makeChicken();
+    grp.position.set(h.x+2, 0, h.z+2);
+    scene.add(grp);
+    state.critters.push({ kind:'chicken', x:h.x+2, z:h.z+2, ax:h.x, az:h.z, speed:2.8, grp, bob:Math.random()*6, wait:Math.random()*2, tgt:null });
+  }
+  if (dogs.length < wantDogs && homes.length) {
+    const grp = makeDog();
+    grp.position.set(homes[0].x+3, 0, homes[0].z);
+    scene.add(grp);
+    state.critters.push({ kind:'dog', x:homes[0].x+3, z:homes[0].z, speed:3.4, grp, bob:0, follow:null, followT:0 });
+  }
+  while (state.critters.length > wantChickens + wantDogs) {
+    const c = state.critters.pop();
+    scene.remove(c.grp); disposeGroup(c.grp);
+  }
+  for (const c of state.critters) {
+    c.bob += dt * 9;
+    if (c.kind === 'chicken') {
+      if (c.wait > 0) { c.wait -= dt; c.grp.position.y = 0; continue; }
+      if (!c.tgt || Math.hypot(c.tgt.x-c.x, c.tgt.z-c.z) < 0.4) {
+        c.tgt = { x: c.ax + (Math.random()-0.5)*9, z: c.az + (Math.random()-0.5)*9 };
+        c.wait = 0.5 + Math.random()*2.5;   // peck, look around
+        continue;
+      }
+      moveToward(c, c.tgt.x, c.tgt.z, dt);
+      c.grp.position.y = Math.abs(Math.sin(c.bob)) * 0.09;   // hoppy little gait
+      c._moved = false;
+    } else {
+      c.followT -= dt;
+      if (c.followT <= 0 || !c.follow || !state.villagers.includes(c.follow)) {
+        c.follow = state.villagers[Math.random()*state.villagers.length|0] || null;
+        c.followT = 14 + Math.random()*12;
+      }
+      if (c.follow) {
+        const d = Math.hypot(c.follow.x-c.x, c.follow.z-c.z);
+        if (d > 1.6) { moveToward(c, c.follow.x, c.follow.z, dt); c._moved = false; }
+        c.grp.position.y = Math.abs(Math.sin(c.bob * 0.8)) * 0.05;
+      }
+    }
+  }
+}
+
 // wall sentries — ceremonial watchmen pacing the wall tops (visual only)
 function sentryTick(dt) {
   for (const w of state.walls) {
@@ -1198,6 +1347,14 @@ function sentryTick(dt) {
       st.x = p.x; st.z = p.z;
       st.grp.position.x = p.x; st.grp.position.z = p.z;
       st.grp.rotation.y = watch ? Math.atan2(watch.x-p.x, watch.z-p.z) : p.ang + (st.dir < 0 ? Math.PI : 0);
+      // hoardings turn watchmen into archers
+      if (w.hoardings && watch && best < 16) {
+        st.cool = (st.cool || 0) - dt;
+        if (st.cool <= 0) {
+          st.cool = 1.2;
+          fireArrow(st.x, st.baseY + 1.2, st.z, watch, 6);
+        }
+      }
     }
   }
 }
@@ -1382,7 +1539,7 @@ function wallPointAt(w, s) {
 
 // gates: [{seg, t}] — gate carved into segment `seg` at param t along it.
 // Walls are built solid; gates exist only where the player cuts them (Gate tool).
-function buildWallMeshes(verts, closed=true, gates=null, tierKey='wall') {
+function buildWallMeshes(verts, closed=true, gates=null, tierKey='wall', hoardings=false) {
   const tier = WALL_TIERS[tierKey] || WALL_TIERS.wall;
   const WH = tier.h;
   const pal = tierKey === 'palisade';
@@ -1435,6 +1592,11 @@ function buildWallMeshes(verts, closed=true, gates=null, tierKey='wall') {
         // gold string-course band near the top
         const trim = box(WALL_T+0.15, 0.3, w2, MAT.rankBanner, p.x, WH-1.2, p.z);
         trim.rotation.y = ang; group.add(trim);
+      }
+      if (hoardings) {
+        // timber fighting gallery hung out over the wall face
+        const rail = box(WALL_T+1.4, 0.5, w2, MAT.timber, p.x, WH+0.9, p.z);
+        rail.rotation.y = ang; group.add(rail);
       }
     }
     // gatehouses, doors and levers — breaches render as charred stumps instead
@@ -1537,7 +1699,7 @@ function buildWallMeshes(verts, closed=true, gates=null, tierKey='wall') {
 function rebuildWall(w) {
   scene.remove(w.group);
   disposeGroup(w.group);
-  const r = buildWallMeshes(w.path, w.closed, w.gates, w.tier || 'wall');
+  const r = buildWallMeshes(w.path, w.closed, w.gates, w.tier || 'wall', !!w.hoardings);
   w.group = r.group;
   w.blockers = r.blockers;
   w.gatePts = r.gatePts;
@@ -1788,6 +1950,18 @@ function breachWall(w, nearX, nearZ) {
   teleEv('palisade_breach');
   msg('🔥 The palisade burns through — the ward lies OPEN until it is repaired (wall tool).', 'warn');
   AudioSys.play('bell');
+}
+function raiseHoardings(w) {
+  if (w.hoardings) { msg('That wall already has hoardings.', 'warn'); return false; }
+  if (state.wood < HOARDING_COST) { msg(`Hoardings cost ${HOARDING_COST} wood.`, 'warn'); return false; }
+  state.wood -= HOARDING_COST;
+  w.hoardings = true;
+  rebuildWall(w);
+  teleEv('hoardings');
+  msg('Hoardings raised — this wall\'s sentries take up bows.', 'good');
+  AudioSys.play('thunk');
+  saveGame();
+  return true;
 }
 function repairWall(w) {
   const cost = 25;
@@ -2090,6 +2264,7 @@ function toolCostStr(t) {
   if (WALL_TIERS[t]) return `${resSVG(WALL_TIERS[t].res, 11)}${WALL_TIERS[t].cost}/u`;
   if (GATE_TIERS[t]) return `${resSVG(GATE_TIERS[t].res, 11)}${GATE_TIERS[t].cost}`;
   if (ROAD_TIERS[t]) return `${resSVG(ROAD_TIERS[t].res, 11)}${ROAD_TIERS[t].cost}/u`;
+  if (t === 'hoardings') return `${resSVG('wood', 11)}${HOARDING_COST}/wall`;
   if (t === 'demolish') return 'refund ½';
   return costStr(BUILD_DEFS[t].cost);
 }
@@ -2097,6 +2272,7 @@ function canAffordTool(t) {
   if (WALL_TIERS[t]) return state[WALL_TIERS[t].res] >= WALL_TIERS[t].cost * 8;
   if (GATE_TIERS[t]) return state[GATE_TIERS[t].res] >= GATE_TIERS[t].cost;
   if (ROAD_TIERS[t]) return state[ROAD_TIERS[t].res] >= ROAD_TIERS[t].cost;
+  if (t === 'hoardings') return state.wood >= HOARDING_COST;
   if (BUILD_DEFS[t]) return canAfford(BUILD_DEFS[t].cost);
   return true;
 }
@@ -2547,18 +2723,37 @@ function spawnRaid() {
   const size = Math.max(1, Math.min(14,
     Math.round((2 + Math.floor(state.day/3) + Math.floor(state.raidNum/4)) * DIFF[state.difficulty].raid)));
   const e = state.raidEdge;
+  const roster = { raider:0, runner:0, brute:0, torch:0 };
   for (let i=0;i<size;i++){
+    const r = Math.random();
+    let kind = 'raider';
+    if (state.raidNum >= 3 && r < 0.15) kind = 'brute';
+    else if (state.raidNum >= 2 && r < 0.35) kind = 'torch';
+    else if (r < 0.55) kind = 'runner';
+    roster[kind]++;
+    const K = RAIDER_KINDS[kind];
     const ox = e.x !== 0 ? e.x * (MAP+18) : (Math.random()-0.5)*140;
     const oz = e.z !== 0 ? e.z * (MAP+18) : (Math.random()-0.5)*140;
-    const grp = makeFigure(0x5c2a20, 'bandit');
+    const grp = makeFigure(K.color, 'bandit');
+    grp.scale.setScalar(K.scale);
     grp.position.set(ox + (Math.random()-0.5)*6, 0, oz + (Math.random()-0.5)*6);
+    if (kind === 'torch') {
+      const fl = new THREE.Sprite(new THREE.SpriteMaterial({ map:P_TEX, color:0xff8a2a, transparent:true, opacity:0.9, blending:THREE.AdditiveBlending, depthWrite:false }));
+      fl.scale.setScalar(1.1);
+      fl.position.set(0.35, 1.5, 0.15);
+      grp.add(fl);
+    }
     scene.add(grp);
     state.bandits.push({
-      x:grp.position.x, z:grp.position.z, hp:35, dps:7, speed:5.5 + Math.random(),
+      x:grp.position.x, z:grp.position.z, kind,
+      hp:K.hp, dps:K.dps, speed:K.spMin + Math.random()*(K.spMax-K.spMin),
       target:null, state:'seek', loiter:0, grp, bob:Math.random()*6,
     });
   }
-  msg(`${size} raiders ride in from the ${e.name.toLowerCase()}!`, 'warn');
+  const notes = [];
+  if (roster.brute) notes.push(`${roster.brute} brute${roster.brute>1?'s':''}`);
+  if (roster.torch) notes.push(`${roster.torch} torch-bearer${roster.torch>1?'s':''}`);
+  msg(`${size} raiders ride in from the ${e.name.toLowerCase()}${notes.length ? ' — with ' + notes.join(' and ') : ''}!`, 'warn');
   teleEv('raid', size);
   AudioSys.play('horn');
   scheduleRaid();
@@ -2620,7 +2815,12 @@ function banditTick(bd, dt) {
     const d = Math.hypot(t.x-bd.x, t.z-bd.z);
     const reach = Math.max(def.w, def.d)/2 + 1.4;
     if (d > reach) moveToward(bd, t.x, t.z, dt);
-    else {
+    else if (bd.kind === 'torch' && FLAMMABLE[t.type] && !t.onFire) {
+      // torch-bearers set the place alight and run
+      igniteBuilding(t);
+      teleEv('torched', t.type);
+      bd.state = 'flee'; bd.target = null;
+    } else {
       t.hp -= bd.dps * dt;
       t.hitFlash = 0.4;
       t.burnT = 0.5;
@@ -2742,6 +2942,18 @@ function guardTick(g, dt) {
 // towers
 const arrowGeo = new THREE.BoxGeometry(0.09, 0.09, 1.4);
 const arrowMat = new THREE.MeshBasicMaterial({ color:0xffe6a0 });
+function fireArrow(fx, fy, fz, foe, dmg, big=false) {
+  foe.hp -= dmg;
+  const m = new THREE.Mesh(arrowGeo, arrowMat);
+  if (big) m.scale.set(3, 3, 2.2);
+  const from = new THREE.Vector3(fx, fy, fz);
+  const to = new THREE.Vector3(foe.x, 1.0, foe.z);
+  m.position.copy(from);
+  m.lookAt(to);
+  scene.add(m);
+  state.arrows.push({ m, from, to, t:0 });
+  if (foe.hp <= 0) removeBandit(foe);
+}
 function towerTick(tw, dt) {
   tw.cool = (tw.cool || 0) - dt;
   if (tw.cool > 0 || !state.bandits.length) return;
@@ -2752,16 +2964,14 @@ function towerTick(tw, dt) {
     if (d < best) { best = d; foe = bd; }
   }
   if (!foe) return;
-  tw.cool = 0.7;
-  foe.hp -= def.dps * 0.7;
-  const m = new THREE.Mesh(arrowGeo, arrowMat);
-  const from = new THREE.Vector3(tw.x, 7.2, tw.z);
-  const to = new THREE.Vector3(foe.x, 1.0, foe.z);
-  m.position.copy(from);
-  m.lookAt(to);
-  scene.add(m);
-  state.arrows.push({ m, from, to, t:0 });
-  if (foe.hp <= 0) removeBandit(foe);
+  if (def.boltDmg) {   // ballista: slow, devastating
+    tw.cool = def.boltCd;
+    fireArrow(tw.x, 4.0, tw.z, foe, def.boltDmg, true);
+    AudioSys.play('thunk');
+  } else {
+    tw.cool = 0.7;
+    fireArrow(tw.x, tw.type === 'watchpost' ? 4.2 : 7.2, tw.z, foe, def.dps * 0.7);
+  }
 }
 function arrowTick(a, dt) {
   a.t += dt * 5;
@@ -2776,15 +2986,44 @@ function villagerTick(dt) {
   const homes = state.buildings.filter(b => !b.ruined && (b.type==='house' || b.type==='keep'));
   while (state.villagers.length < want && homes.length) {
     const h = homes[Math.random()*homes.length|0];
-    const grp = makeFigure([0x8c6a3a, 0x5a7a4a, 0x7a5a7a, 0x9c8248, 0x6a4a6a, 0x4a6a7a, 0xa87848, 0x836b52][Math.random()*8|0], 'villager');
-    grp.scale.setScalar(0.7 + Math.random()*0.22);
+    const tunic = [0x8c6a3a, 0x5a7a4a, 0x7a5a7a, 0x9c8248, 0x6a4a6a, 0x4a6a7a, 0xa87848, 0x836b52][Math.random()*8|0];
+    // folk come in kinds: children run, elders shuffle, monks drift near the chapel
+    const kr = Math.random();
+    const hasChapel = state.buildings.some(b => !b.ruined && b.type === 'chapel');
+    const kind = kr < 0.15 ? 'child' : kr < 0.25 ? 'elder' : (hasChapel && kr < 0.33) ? 'monk' : 'adult';
+    const grp = makeFigure(kind === 'monk' ? 0x6a5a48 : tunic, kind === 'monk' ? 'monk' : 'villager');
+    grp.scale.setScalar(kind === 'child' ? 0.5 + Math.random()*0.08 : kind === 'elder' ? 0.72 : 0.7 + Math.random()*0.22);
     grp.position.set(h.x+1.5, 0, h.z+1.5);
     scene.add(grp);
     const sack = box(0.34, 0.3, 0.26, new THREE.MeshLambertMaterial({ color:0xa8905e }), 0, 1.0, 0.32);
     sack.visible = false;
     grp.add(sack);
-    const vv = { x:h.x+1.5, z:h.z+1.5, home:h, tgt:null, speed:1.6, grp, sack, bob:Math.random()*6, wait:Math.random()*3,
-      vname: FOLK_NAMES[Math.random()*FOLK_NAMES.length|0], trade: FOLK_TRADES[Math.random()*FOLK_TRADES.length|0] };
+    // winter cloak, hidden until the snow
+    const cloak = box(0.46, 0.62, 0.09, new THREE.MeshLambertMaterial({ color:0x4a3828 }), 0, 0.85, -0.21);
+    cloak.visible = false;
+    grp.add(cloak);
+    const trade = kind === 'monk' ? 'monk' : kind === 'child' ? 'child' : FOLK_TRADES[Math.random()*FOLK_TRADES.length|0];
+    // trades carry their tools
+    const L = grp.userData.limbs;
+    if (L && kind === 'adult') {
+      if (['shepherd','miller','carter'].includes(trade)) {
+        const hoe = cyl(0.03, 0.03, 1.3, MAT.timber, 0, -0.5, 0.1, 5);
+        hoe.add(box(0.2, 0.06, 0.1, MAT.stoneD, 0, -0.62, 0.05));
+        L.armR.add(hoe);
+      } else if (['smith','cooper','fletcher','tanner','mason'].includes(trade)) {
+        const ham = cyl(0.03, 0.03, 0.6, MAT.timber, 0, -0.45, 0.1, 5);
+        ham.add(box(0.16, 0.1, 0.22, MAT.stoneD, 0, -0.28, 0));
+        L.armR.add(ham);
+      }
+    }
+    if (L && kind === 'elder') {
+      const cane = cyl(0.025, 0.025, 0.85, MAT.timber, 0, -0.5, 0.12, 5);
+      L.armR.add(cane);
+    }
+    const vv = { x:h.x+1.5, z:h.z+1.5, home:h, tgt:null, kind,
+      speed: kind === 'child' ? 2.5 : kind === 'elder' ? 0.95 : kind === 'monk' ? 1.2 : 1.6,
+      grp, sack, cloak, bob:Math.random()*6, wait:Math.random()*3,
+      vname: FOLK_NAMES[Math.random()*FOLK_NAMES.length|0], trade };
     grp.traverse(o => { o.userData.v = vv; });
     state.villagers.push(vv);
   }
@@ -2793,9 +3032,11 @@ function villagerTick(dt) {
     scene.remove(v.grp);
     disposeGroup(v.grp);
   }
+  const winterNow = seasonOf(state.day).nm === 'Winter';
   for (const v of state.villagers) {
     if (v.home.ruined) { v.home = homes.length ? homes[0] : v.home; }
     v.bob += dt*8;
+    if (v.cloak) v.cloak.visible = winterNow;
     if (v.wait > 0) { v.wait -= dt; continue; }
     if (!v.path) {
       // pick an errand: fields, market, the keep — routed through gates
@@ -2807,7 +3048,9 @@ function villagerTick(dt) {
           const arr = state.buildings.filter(b => !b.ruined && b.buildT >= 1 && b.type === type);
           return arr.length ? arr[Math.random()*arr.length|0] : null;
         };
-        if (r < 0.3) dest = pick('farm');
+        if (v.kind === 'monk') dest = r < 0.7 ? pick('chapel') : state.buildings.find(b => b.type === 'keep');
+        else if (v.kind === 'child') dest = r < 0.3 ? pick('fountain') || pick('garden') : null;
+        else if (r < 0.3) dest = pick('farm');
         else if (r < 0.45) dest = pick('market');
         else if (r < 0.55) dest = nightFactor > 0.3 ? pick('tavern') : pick('chapel');
         else if (r < 0.62) dest = pick('fountain') || pick('tavern');
@@ -3002,6 +3245,12 @@ function handleClick() {
     gateClickAt(mouseGround.x, mouseGround.z);
     return;
   }
+  if (tool === 'hoardings') {
+    const sp = wallSnap(mouseGround.x, mouseGround.z);
+    if (!sp) { msg('Click a wall to raise hoardings on it.', 'warn'); return; }
+    raiseHoardings(sp.wall);
+    return;
+  }
   if (tool === 'demolish') {
     const b = pickBuilding();
     if (b) { demolish(b); saveGame(); return; }
@@ -3068,7 +3317,7 @@ function saveGame(key = 'bulwark-save') {
       pop:state.pop, maxPop:state.maxPop, rankIdx:state.rankIdx, time:state.time, raidNum:state.raidNum,
       buildings: state.buildings.map(b => ({ type:b.type, x:b.x, z:b.z, rot:b.rot||0, hp:b.hp, ruined:b.ruined })),
       walls: state.walls.map(w => ({ poly:w.poly, path:w.path, closed:w.closed,
-        tier:w.tier||'wall', breached:!!w.breached,
+        tier:w.tier||'wall', breached:!!w.breached, hoardings:!!w.hoardings,
         gates: w.gates.map(g => ({ seg:g.seg, t:g.t, tier:g.tier, breach:!!g.breach })) })),
     }));
   } catch (e) {}
@@ -3104,9 +3353,9 @@ function loadGame() {
     const path = w.path || w.verts, poly = w.poly || w.verts;   // legacy saves used {verts}
     const closed = w.closed !== undefined ? w.closed : true;
     const tierKey = WALL_TIERS[w.tier] ? w.tier : 'wall';
-    const { group, gates, blockers, gatePts } = buildWallMeshes(path, closed, w.gates || null, tierKey);
+    const { group, gates, blockers, gatePts } = buildWallMeshes(path, closed, w.gates || null, tierKey, !!w.hoardings);
     scene.add(group);
-    state.walls.push({ poly, path, closed, tier: tierKey, breached: !!w.breached, group, gates, blockers, gatePts });
+    state.walls.push({ poly, path, closed, tier: tierKey, breached: !!w.breached, hoardings: !!w.hoardings, group, gates, blockers, gatePts });
   }
   for (const b of s.buildings) {
     const nb = placeBuilding(b.type, b.x, b.z, true, b.rot || 0);
@@ -3167,7 +3416,19 @@ function step(dt) {
       if (b.buildT >= 1) finishConstruction(b);
       continue;   // nothing works until it's built
     }
-    if (b.type === 'tower' || b.type === 'watchpost') towerTick(b, dt);
+    if (b.type === 'tower' || b.type === 'watchpost' || b.type === 'ballista') towerTick(b, dt);
+    if (b.type === 'stakes' && state.bandits.length) {
+      const dead = [];
+      for (const bd of state.bandits) {
+        if (Math.hypot(bd.x-b.x, bd.z-b.z) < 2.8) {
+          bd.hp -= BUILD_DEFS.stakes.stakeDps * dt;
+          b.hp -= 2.5 * dt;
+          if (bd.hp <= 0) dead.push(bd);
+        }
+      }
+      dead.forEach(removeBandit);
+      if (b.hp <= 0) destroyBuilding(b);
+    }
     if (b.type === 'barracks') {
       const mine = state.guards.filter(g => g.home === b).length;
       b.respawnT = (b.respawnT || 0) - dt;
@@ -3197,12 +3458,18 @@ function step(dt) {
   for (const w of state.walls) if (w.sentries) figures.push(...w.sentries);
   for (const a of figures) {
     animateFigure(a, dt);
+    // field hands swing their tools while working at the farm
+    if (a.path === null && a.phase === 'out' && a.wait > 0 && a.destType === 'farm') {
+      const L = a.grp.userData.limbs;
+      if (L) { L.armR.rotation.x = -0.6 + Math.sin(a.bob * 1.4) * 0.8; a._moved = false; }
+    }
     if (a._moved && !a.baseY) {   // sentries walk the parapet, no ground wear
       a._wearT = (a._wearT || 0) - dt;
       if (a._wearT <= 0) { a._wearT = 0.3; stampWear(a.x, a.z, 0.7, 0.04); }
     }
     a._moved = false;
   }
+  critterTick(dt);
   objT += dt;
   if (objT >= 0.5) { objT = 0; updateObjectives(); }
   teleSample(dt);
@@ -3295,7 +3562,8 @@ function frame(dt) {
       hintEl.style.display = 'block';
       hintEl.style.left = (mousePx.x + 16) + 'px';
       hintEl.style.top = (mousePx.y + 12) + 'px';
-      hintEl.innerHTML = `${hoverV.vname} the ${hoverV.trade}`;
+      hintEl.innerHTML = hoverV.trade === 'child' ? `${hoverV.vname}, a child` :
+        hoverV.trade === 'monk' ? `Brother ${hoverV.vname}` : `${hoverV.vname} the ${hoverV.trade}`;
     } else if (b && b !== selB) {
       hintEl.style.display = 'block';
       hintEl.style.left = (mousePx.x + 16) + 'px';
@@ -3654,6 +3922,9 @@ window.BULWARK = {
   clickWall: (x,z) => { const prev = tool; tool = 'wall'; wallClickAt(x, z); tool = prev; },
   cutGate: (x,z,tier) => gateClickAt(x, z, tier),
   breachAt: (x,z) => { const sp = wallSnap(x, z); if (sp) breachWall(sp.wall, x, z); return !!sp; },
+  hoardingsAt: (x,z) => { const sp = wallSnap(x, z); return sp ? raiseHoardings(sp.wall) : false; },
+  placeFree: (t,x,z) => placeBuilding(t, x, z, true),
+  roadSpeedAt,
   removeWallAt: (x,z) => { const sp = wallSnap(x, z); if (sp) removeWall(sp.wall); return !!sp; },
   paintRoad: (x,z,tier) => paintRoadAt(x, z, tier),
   teleReport: () => buildTeleReport(),

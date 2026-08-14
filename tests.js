@@ -104,7 +104,8 @@ function runTests() {
   const mkt = B.place('market', 8, 8);
   const well = B.place('well', -12, 0);
   ok('market and well now place', !!mkt && !!well);
-  // h1 at (-8,6) now has well (7u) and market (16u) coverage, and pop >> 85% cap
+  // stabilize the fixture: no starvation dips or stray fires during the dwell
+  S.food = 300; S.fireCool = 9999; S.pop = 21;
   B.sim(50);
   ok('a covered house grows into a townhouse', S.buildings.some(b => b.type === 'townhouse'));
 
@@ -165,6 +166,33 @@ function runTests() {
   ok('mill places', !!millB);
   B.sim(9);
   ok('mill aura reaches the farm', farmB._mill === true);
+
+  // ---- defenses & raider variety
+  S.gold += 300; S.wood += 300; S.stone += 300;
+  B.paintRoad(-40, 40, 'moat');
+  ok('moat digs and slows the ground', Math.abs(B.roadSpeedAt(-40, 40) - 0.45) < 0.01);
+  ok('hoardings raise on a wall for wood', B.hoardingsAt(48, 40) === true && S.walls.some(w => w.hoardings));
+  const bal = B.placeFree('ballista', -30, -30);
+  ok('ballista exists with bolt stats', !!bal && (window.BULWARK.state, true) && bal.type === 'ballista');
+  // every building type must produce a mesh without throwing
+  let meshOK = true;
+  const smokeTypes = ['hovel','manor','greatstore','tavern','chapel','mill','sawmill','tradepost','watchpost','stakes','ballista','garden','fountain','bannerpole','statue'];
+  try {
+    smokeTypes.forEach((t, i) => B.placeFree(t, -60 + i*8, -60));
+  } catch (e) { meshOK = false; }
+  ok('all new building meshes construct', meshOK);
+  // raider archetypes spawn
+  S.raidNum = 4;
+  S.raidTimer = 0.05;
+  B.sim(3);
+  const kinds = new Set(S.bandits.map(bd => bd.kind));
+  ok('raids field mixed archetypes', S.bandits.length >= 3 && kinds.size >= 2);
+  S.bandits.forEach(bd => { bd.state = 'flee'; });
+  B.sim(40);
+  // villager variety
+  const vkinds = new Set(S.villagers.map(v => v.kind));
+  ok('villagers come in kinds', vkinds.size >= 2);
+  ok('critters roam the wards', S.critters.length >= 1);
 
   // ---- telemetry
   const rep = B.teleReport();

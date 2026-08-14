@@ -127,6 +127,23 @@ export const ICON = {
     <path d="M18 52 H46 M22 52 V44 H42 V52"/>
     <path d="M32 20 A5 5 0 1 0 32 10 A5 5 0 0 0 32 20 M26 44 V30 Q26 24 32 24 Q38 24 38 30 V44"/>
     <path d="M26 30 L20 36 M38 28 L44 24" stroke-width="2"/></g>`,
+  stakes: `<g ${S()}>
+    <path d="M12 52 L20 24 M20 52 L28 20 M32 52 L40 22 M44 52 L52 26"/>
+    <path d="M17 33 L25 30 M37 31 L45 29" stroke-width="1.7"/>
+    <path d="M8 52 H56" stroke-width="2.4"/></g>`,
+  hoardings: `<g ${S()}>
+    <path d="M10 52 V34 H54 V52"/>
+    <path d="M8 34 H56 M8 26 H56 M12 26 V34 M22 26 V34 M32 26 V34 M42 26 V34 M52 26 V34"/>
+    <path d="M16 26 L20 18 M28 26 L32 18 M40 26 L44 18" stroke-width="1.8"/></g>`,
+  moat: `<g ${S(2.2)}>
+    <path d="M8 24 Q16 18 24 24 Q32 30 40 24 Q48 18 56 24"/>
+    <path d="M8 36 Q16 30 24 36 Q32 42 40 36 Q48 30 56 36"/>
+    <path d="M8 48 Q16 42 24 48 Q32 54 40 48 Q48 42 56 48"/></g>`,
+  ballista: `<g ${S()}>
+    <path d="M14 52 L32 34 M50 52 L32 34"/>
+    <path d="M12 20 Q32 34 52 20"/>
+    <path d="M32 34 L32 12 M28 16 L32 10 L36 16" stroke-width="2.2"/>
+    <path d="M22 52 H42" stroke-width="2.6"/></g>`,
   // ---- tools
   demolish: `<g ${S()}>
     <path d="M20 44 L40 24"/>

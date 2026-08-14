@@ -181,7 +181,8 @@ function runTests() {
   // every building type must produce a mesh without throwing
   let meshOK = true;
   const smokeTypes = ['hovel','manor','greatstore','tavern','chapel','mill','sawmill','tradepost','watchpost','stakes','ballista','garden','fountain','bannerpole','statue',
-    'infirmary','bathhouse','school','orchard','beacon','townhall'];
+    'infirmary','bathhouse','school','orchard','beacon','townhall',
+    'longhouse','rowhouse','townhouse','woodpile','cart','signpost','lamppost'];
   try {
     smokeTypes.forEach((t, i) => B.placeFree(t, -60 + (i % 14)*8, -60 + Math.floor(i / 14)*10));
   } catch (e) { meshOK = false; }
@@ -230,6 +231,18 @@ function runTests() {
   ok('almanac lists the buildings', almBody.includes('Keep') && almBody.includes('Town Hall'));
   document.getElementById('almClose').click();
   ok('almanac closes', document.getElementById('almanac').style.display === 'none');
+
+  // ---- manual upgrades
+  S.wood += 200; S.stone += 200; S.gold += 200;
+  const upHovel = B.placeFree('hovel', -70, 30);
+  B.upgrade(upHovel);
+  ok('a hovel upgrades to a house for a price', upHovel.type === 'house');
+  const upPost = B.placeFree('watchpost', -70, 42);
+  B.upgrade(upPost);
+  ok('a watchpost upgrades to an arrow tower', upPost.type === 'tower');
+  const wood0 = S.wood;
+  B.upgrade(upPost);   // tower has no path — nothing should happen or charge
+  ok('a tower has no further upgrade', upPost.type === 'tower' && S.wood === wood0);
 
   // ---- occasions & photo mode
   ok('the harvest festival falls on autumn’s first day',

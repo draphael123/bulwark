@@ -49,6 +49,16 @@ export const ICON = {
   house: `<g ${S()}>
     <path d="M12 30 L32 12 L52 30 V52 H12 Z"/>
     <path d="M12 30 H52 M26 52 V38 H38 V52 M16 34 L24 34 M40 34 L48 34" stroke-width="1.6"/></g>`,
+  longhouse: `<g ${S()}>
+    <path d="M8 34 L16 20 H48 L56 34 V52 H8 Z"/>
+    <path d="M8 34 H56 M16 52 V42 H24 V52 M40 52 V42 H48 V52" stroke-width="1.6"/>
+    <path d="M16 20 L12 13 M16 20 L21 13 M48 20 L43 13 M48 20 L52 13" stroke-width="1.8"/></g>`,
+  rowhouse: `<g ${S()}>
+    <path d="M16 52 V26 H22 V20 H28 V13 H36 V20 H42 V26 H48 V52 Z"/>
+    <path d="M16 37 H48 M27 52 V43 H37 V52 M21 31 H27 M37 31 H43 M28 20 H36" stroke-width="1.6"/></g>`,
+  townhouse: `<g ${S()}>
+    <path d="M14 30 L32 13 L50 30 V52 H14 Z"/>
+    <path d="M10 30 H54 M14 41 H50 M26 52 V45 H38 V52 M19 35 H26 M38 35 H45 M22 24 H28 M36 24 H42" stroke-width="1.6"/></g>`,
   well: `<g ${S()}>
     <path d="M16 36 A16 8 0 1 0 48 36 A16 8 0 1 0 16 36 M16 36 V46 A16 8 0 0 0 48 46 V36"/>
     <path d="M22 30 V14 H42 V30 M32 14 V26" stroke-width="2"/>
@@ -170,6 +180,21 @@ export const ICON = {
     <path d="M10 52 V26 H54 V52 Z M8 26 L32 12 L56 26"/>
     <path d="M16 52 V34 H24 V52 M40 52 V34 H48 V52 M28 40 H36 V52 H28 Z" stroke-width="1.7"/>
     <path d="M32 12 V6 M32 6 H42 L37 9 L42 12 H32" stroke-width="1.8"/></g>`,
+  woodpile: `<g ${S(2.2)}>
+    <circle cx="20" cy="46" r="6"/><circle cx="33" cy="46" r="6"/><circle cx="46" cy="46" r="6"/>
+    <circle cx="26" cy="35" r="6"/><circle cx="39" cy="35" r="6"/><circle cx="33" cy="24" r="6"/></g>`,
+  cart: `<g ${S(2.2)}>
+    <path d="M12 30 H42 V40 H12 Z M42 32 L56 22"/>
+    <circle cx="20" cy="46" r="6"/><circle cx="36" cy="46" r="6"/>
+    <path d="M16 30 V25 M24 30 V25 M32 30 V25" stroke-width="1.6"/></g>`,
+  signpost: `<g ${S(2.4)}>
+    <path d="M30 54 V12"/>
+    <path d="M30 19 H50 L55 23 L50 27 H30 M30 33 H14 L9 37 L14 41 H30" stroke-width="2.2"/></g>`,
+  lamppost: `<g ${S(2.4)}>
+    <path d="M28 54 V14 Q28 9 36 9"/>
+    <path d="M33 13 H43 L41 25 H35 Z" stroke-width="2"/>
+    <circle cx="38" cy="19" r="2.2" stroke-width="1.6"/>
+    <path d="M22 54 H36" stroke-width="2.2"/></g>`,
   almanac: `<g ${S()}>
     <path d="M32 14 Q22 8 12 10 V48 Q22 46 32 52 Q42 46 52 48 V10 Q42 8 32 14 Z M32 14 V52"/>
     <path d="M17 20 H27 M17 26 H27 M37 20 H47 M37 26 H47 M17 32 H27" stroke-width="1.5"/></g>`,

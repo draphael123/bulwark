@@ -16,7 +16,9 @@ const GATE_W = 6;
 const BUILD_DEFS = {
   hovel:      { nm:'Hovel',      w:2,  d:2,  hp:40,  cost:{wood:10},            popCap:2, needsWard:true },
   house:      { nm:'House',      w:3,  d:3,  hp:60,  cost:{wood:20},            popCap:4, needsWard:true },
-  townhouse:  { nm:'Townhouse',  w:3,  d:3,  hp:90,  cost:{},                   popCap:8, needsWard:true },  // upgrade only
+  longhouse:  { nm:'Longhouse',  w:5,  d:3,  hp:80,  cost:{wood:45, gold:10},   popCap:6, needsWard:true },
+  rowhouse:   { nm:'Rowhouse',   w:4,  d:3,  hp:100, cost:{wood:30, stone:35, gold:15}, popCap:7, needsWard:true },
+  townhouse:  { nm:'Townhouse',  w:3,  d:3,  hp:90,  cost:{wood:45, stone:20, gold:30}, popCap:8, needsWard:true },
   manor:      { nm:'Manor',      w:3,  d:3,  hp:120, cost:{},                   popCap:12, needsWard:true }, // upgrade only
   well:       { nm:'Well',       w:2,  d:2,  hp:60,  cost:{wood:10, stone:15},  coverR:14, needsWard:true },
   granary:    { nm:'Granary',    w:4,  d:4,  hp:80,  cost:{wood:35, stone:15},  storage:180, needsWard:true },
@@ -45,17 +47,21 @@ const BUILD_DEFS = {
   fountain:   { nm:'Fountain',   w:2,  d:2,  hp:60,  cost:{stone:20, gold:15},  boostR:10, needsWard:true },
   bannerpole: { nm:'Banner',     w:2,  d:2,  hp:40,  cost:{wood:8, gold:5},     needsWard:true },
   statue:     { nm:'Statue',     w:2,  d:2,  hp:80,  cost:{stone:30, gold:30},  needsWard:true },
+  woodpile:   { nm:'Woodpile',   w:2,  d:2,  hp:30,  cost:{wood:6} },
+  cart:       { nm:'Cart',       w:2,  d:2,  hp:30,  cost:{wood:12} },
+  signpost:   { nm:'Signpost',   w:2,  d:2,  hp:20,  cost:{wood:5} },
+  lamppost:   { nm:'Lamp Post',  w:2,  d:2,  hp:30,  cost:{wood:8, gold:5} },
   keep:       { nm:'Keep',       w:6,  d:6,  hp:400, cost:{},                   popCap:8 },
 };
 // the palette is tabbed by trade; digits pick within the open tab
 const TABS = [
   { id:'wallTab',  nm:'WALLS',  tools:['palisade','wall','highwall','woodgate','gate','greatgate'] },
   { id:'roadTab',  nm:'ROADS',  tools:['dirtroad','road','flagroad'] },
-  { id:'townTab',  nm:'TOWN',   tools:['hovel','house','well','granary','greatstore','market'] },
+  { id:'townTab',  nm:'TOWN',   tools:['hovel','house','longhouse','rowhouse','townhouse','well','granary','greatstore','market'] },
   { id:'civicTab', nm:'CIVIC',  tools:['tavern','chapel','infirmary','bathhouse','school','townhall'] },
   { id:'workTab',  nm:'WORKS',  tools:['farm','orchard','mill','woodcutter','sawmill','quarry','tradepost'] },
   { id:'guardTab', nm:'GUARD',  tools:['stakes','watchpost','beacon','hoardings','moat','tower','ballista','barracks'] },
-  { id:'decorTab', nm:'DECOR',  tools:['garden','fountain','bannerpole','statue'] },
+  { id:'decorTab', nm:'DECOR',  tools:['garden','fountain','bannerpole','statue','woodpile','cart','signpost','lamppost'] },
 ];
 const WALL_TIERS = {
   palisade: { nm:'Palisade',  res:'wood',  cost:0.8, h:3.8, flammable:true },
@@ -91,9 +97,9 @@ const GATE_COST = 10; // stone, for the Gate tool
 
 // ---------------------------------------------------------------- state
 const RANKS = [
-  { pop: 0,  nm: 'Hamlet',  unlocks: ['palisade','wall','woodgate','dirtroad','road','hovel','house','farm','woodcutter','demolish'] },
-  { pop: 12, nm: 'Village', unlocks: ['gate','well','granary','quarry','mill','sawmill','tavern','watchpost','stakes','orchard','beacon'] },
-  { pop: 20, nm: 'Town',    unlocks: ['highwall','flagroad','market','chapel','tower','tradepost','fountain','garden','hoardings','moat','infirmary','bathhouse','school'] },
+  { pop: 0,  nm: 'Hamlet',  unlocks: ['palisade','wall','woodgate','dirtroad','road','hovel','house','farm','woodcutter','demolish','woodpile','signpost'] },
+  { pop: 12, nm: 'Village', unlocks: ['gate','well','granary','quarry','mill','sawmill','tavern','watchpost','stakes','orchard','beacon','longhouse','cart','lamppost'] },
+  { pop: 20, nm: 'Town',    unlocks: ['highwall','flagroad','market','chapel','tower','tradepost','fountain','garden','hoardings','moat','infirmary','bathhouse','school','rowhouse','townhouse'] },
   { pop: 32, nm: 'City',    unlocks: ['greatgate','greatstore','barracks','statue','bannerpole','ballista','townhall'] },
 ];
 
@@ -232,18 +238,51 @@ function updateAtmosphere() {
   moonSpr.material.opacity = nightFactor * 0.9;
 }
 
-// ground with baked high-frequency grass speckle
+// ground with baked high-frequency meadow detail — blade strokes, clover
+// clumps, seed heads. High-frequency ONLY: low-frequency features would
+// betray the tiling grid.
 function grassTexture() {
-  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const c = document.createElement('canvas'); c.width = c.height = 512;
   const g = c.getContext('2d');
-  g.fillStyle = '#78975200'; g.fillStyle = '#789752'; g.fillRect(0,0,256,256);
-  for (let i=0;i<9000;i++){
+  g.fillStyle = '#789752'; g.fillRect(0, 0, 512, 512);
+  // base mottle
+  for (let i = 0; i < 26000; i++) {
     const v = Math.random();
-    g.fillStyle = v<.5 ? '#6f8d4b' : (v<.85 ? '#82a25b' : '#8fae66');
-    g.fillRect(Math.random()*256|0, Math.random()*256|0, 2, 2);
+    g.fillStyle = v < .45 ? '#6f8d4b' : (v < .8 ? '#82a25b' : '#8fae66');
+    g.fillRect(Math.random()*512|0, Math.random()*512|0, 2, 2);
+  }
+  // grass blades: short curved strokes in layered greens
+  const blades = ['#5f7f40', '#6c9048', '#7ba054', '#8fb264', '#59763c'];
+  g.lineWidth = 1.1;
+  g.lineCap = 'round';
+  for (let i = 0; i < 5200; i++) {
+    const x = Math.random()*512, y = Math.random()*512;
+    const len = 3 + Math.random()*4, lean = (Math.random()-0.5)*3;
+    g.strokeStyle = blades[Math.random()*blades.length|0];
+    g.beginPath();
+    g.moveTo(x, y);
+    g.quadraticCurveTo(x + lean*0.5, y - len*0.6, x + lean, y - len);
+    g.stroke();
+  }
+  // clover clumps — tight dark rosettes
+  for (let i = 0; i < 340; i++) {
+    const x = Math.random()*512, y = Math.random()*512;
+    g.fillStyle = Math.random() < 0.5 ? '#557539' : '#618345';
+    for (let k = 0; k < 4; k++) {
+      g.beginPath();
+      g.arc(x + (Math.random()-0.5)*4, y + (Math.random()-0.5)*4, 1.4, 0, 6.29);
+      g.fill();
+    }
+  }
+  // stray seed heads and tiny flowers
+  for (let i = 0; i < 260; i++) {
+    const x = Math.random()*512, y = Math.random()*512;
+    const v = Math.random();
+    g.fillStyle = v < 0.5 ? '#c9c07a' : v < 0.8 ? '#e8e2c8' : '#d9a8b8';
+    g.fillRect(x, y, 1.6, 1.6);
   }
   const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(24,24);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(20,20);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
@@ -1169,6 +1208,80 @@ function buildMesh(type, bx = 0, bz = 0) {
     }
     if ((vh*23) % 1 < 0.5) firewoodStack(g, 0.95, -0.75);
     g.rotation.y = ((vh*16)|0) % 4 * Math.PI/2;
+  } else if (type === 'longhouse') {
+    // a timber hall for a whole kin — ridge running the long way
+    g.add(box(4.4, 1.6, 2.3, MAT.timber, 0, 0.8, 0));
+    const r = new THREE.Mesh(prismGeo(2.7, 1.5, 4.8), MAT.roofD);
+    r.position.y = 1.6; r.rotation.y = Math.PI/2; r.castShadow = true; g.add(r);
+    // crossed gable beams, old-northern style
+    for (const s of [-1, 1]) {
+      const bm1 = box(0.1, 1.0, 0.1, MAT.ruin, s*2.4, 3.0, 0.25);
+      bm1.rotation.x = 0.45;
+      const bm2 = box(0.1, 1.0, 0.1, MAT.ruin, s*2.4, 3.0, -0.25);
+      bm2.rotation.x = -0.45;
+      g.add(bm1, bm2);
+    }
+    g.add(chim(0.4, 0.8, 0.4, 0.9, 2.7, 0));
+    for (const dx of [-1.2, 1.2]) g.add(box(0.7, 1.1, 0.08, MAT.ruin, dx, 0.55, 1.19));
+    for (const wx of [-0.2, 0.55]) {
+      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.4), MAT.window);
+      win.position.set(wx, 1.05, 1.17); g.add(win);
+      const glow = new THREE.Sprite(MAT.windowGlow);
+      glow.scale.setScalar(1.2); glow.position.copy(win.position); g.add(glow);
+    }
+    if ((vh*23) % 1 < 0.5) firewoodStack(g, -1.9, -1.0);
+    g.rotation.y = ((vh*16)|0) % 4 * Math.PI/2;
+  } else if (type === 'rowhouse') {
+    // tall stone-footed burgher block with a crow-stepped gable
+    g.add(box(3.2, 1.5, 2.3, MAT.stone, 0, 0.75, 0));
+    g.add(box(3.0, 1.4, 2.2, MAT.plaster, 0, 2.2, 0));
+    for (const px of [-1.45, 0, 1.45]) g.add(box(0.12, 1.4, 0.12, MAT.timber, px, 2.2, 1.08));
+    const r = new THREE.Mesh(prismGeo(3.4, 1.3, 2.5), MAT.roofB);
+    r.position.y = 2.9; r.castShadow = true; g.add(r);
+    // crow steps up the gable ends
+    for (const s of [-1, 1]) for (let i = 0; i < 3; i++)
+      g.add(box(0.35, 0.32, 2.42, MAT.stone, s*(1.55 - i*0.35), 3.0 + i*0.32, 0));
+    g.add(chim(0.4, 1.0, 0.4, -0.9, 3.9, 0.5));
+    g.add(box(0.9, 1.2, 0.08, MAT.timber, 0.6, 0.6, 1.19));
+    for (const yy of [1.0, 2.3]) for (const wx of [-0.8, 0.2]) {
+      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.5), MAT.window);
+      win.position.set(wx, yy, yy > 2 ? 1.13 : 1.18); g.add(win);
+      const glow = new THREE.Sprite(MAT.windowGlow);
+      glow.scale.setScalar(1.2); glow.position.copy(win.position); g.add(glow);
+    }
+    g.rotation.y = ((vh*16)|0) % 4 * Math.PI/2;
+  } else if (type === 'woodpile') {
+    firewoodStack(g, -0.35, 0);
+    firewoodStack(g, 0.45, 0.1);
+    g.add(cyl(0.06, 0.07, 1.1, MAT.timber, -0.85, 0.55, 0, 4));
+    g.add(cyl(0.06, 0.07, 1.1, MAT.timber, 0.95, 0.55, 0.1, 4));
+    g.rotation.y = vh * Math.PI * 2;
+  } else if (type === 'cart') {
+    handCart(g, vh, 0, 0);
+    const sackM = new THREE.MeshLambertMaterial({ color:0xc4a86a });
+    for (const [sx, sz] of [[-0.15, 0.1], [0.2, -0.12]]) {
+      const sk = new THREE.Mesh(new THREE.SphereGeometry(0.2, 6, 5), sackM);
+      sk.position.set(sx, 0.6, sz); sk.scale.y = 0.8; sk.castShadow = true; g.add(sk);
+    }
+  } else if (type === 'signpost') {
+    g.add(cyl(0.07, 0.09, 2.4, MAT.timber, 0, 1.2, 0, 5));
+    for (const [y, ry] of [[2.1, 0.4], [1.7, -0.9]]) {
+      const arm = box(0.9, 0.16, 0.05, MAT.timber, 0.42, y, 0);
+      arm.rotation.y = ry;
+      g.add(arm);
+    }
+    g.rotation.y = vh * Math.PI * 2;
+  } else if (type === 'lamppost') {
+    g.add(cyl(0.06, 0.09, 2.6, MAT.ruin, 0, 1.3, 0, 5));
+    const arm = box(0.5, 0.06, 0.06, MAT.ruin, 0.22, 2.55, 0);
+    g.add(arm);
+    g.add(box(0.22, 0.3, 0.22, MAT.timber, 0.45, 2.4, 0));
+    const win = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.2), MAT.window);
+    win.position.set(0.45, 2.4, 0.12); g.add(win);
+    const glow = new THREE.Sprite(MAT.windowGlow);
+    glow.scale.setScalar(1.6);
+    glow.position.set(0.45, 2.4, 0);
+    g.add(glow);
   } else if (type === 'manor') {
     g.add(box(2.9, 1.6, 2.9, MAT.stone, 0, 0.8, 0));
     g.add(box(3.1, 1.5, 3.1, MAT.timber, 0, 2.35, 0));
@@ -1620,6 +1733,24 @@ const flyPh = new Float32Array(FLY_N);
   flyPts.frustumCulled = false;
   scene.add(flyPts);
 }
+const BF_N = 26;
+let bfPts;
+const bfPh = new Float32Array(BF_N);
+{
+  const v = new Float32Array(BF_N * 3);
+  for (let i=0;i<BF_N;i++){
+    v[i*3] = (Math.random()-0.5)*100;
+    v[i*3+1] = 0.4 + Math.random()*1.6;
+    v[i*3+2] = (Math.random()-0.5)*100;
+    bfPh[i] = Math.random()*6.28;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(v, 3));
+  bfPts = new THREE.Points(g, new THREE.PointsMaterial({
+    color:0xf2e2a8, size:0.26, transparent:true, opacity:0, depthWrite:false }));
+  bfPts.frustumCulled = false;
+  scene.add(bfPts);
+}
 const LEAF_N = 70;
 let leafPts;
 {
@@ -1649,6 +1780,21 @@ function ambientTick(dt) {
       p.setX(i, p.getX(i) + Math.sin(flyPh[i]*1.3 + i) * dt * 1.2);
       p.setY(i, 0.6 + Math.sin(flyPh[i]*0.7)*0.5 + Math.sin(flyPh[i]*2.1 + i)*0.3);
       p.setZ(i, p.getZ(i) + Math.cos(flyPh[i]*1.1 + i*2) * dt * 1.2);
+    }
+    p.needsUpdate = true;
+  }
+  // butterflies work the flowers on warm, dry days
+  const bTarget = (state.started && nightFactor < 0.3 && !state.raining
+    && (seasonNm === 'Spring' || seasonNm === 'Summer')) ? 0.85 : 0;
+  bfPts.material.opacity += (bTarget - bfPts.material.opacity) * Math.min(1, dt*0.7);
+  if (bfPts.material.opacity > 0.03) {
+    bfPts.position.set(camTarget.x, 0, camTarget.z);
+    const p = bfPts.geometry.attributes.position;
+    for (let i=0;i<BF_N;i++){
+      bfPh[i] += dt * (1.1 + (i % 4) * 0.2);
+      p.setX(i, p.getX(i) + Math.sin(bfPh[i]*1.7 + i)*dt*2.2);
+      p.setY(i, 0.5 + Math.abs(Math.sin(bfPh[i]*1.2))*1.1 + Math.sin(bfPh[i]*3.1 + i)*0.2);
+      p.setZ(i, p.getZ(i) + Math.cos(bfPh[i]*1.3 + i*2)*dt*2.2);
     }
     p.needsUpdate = true;
   }
@@ -1756,6 +1902,20 @@ function makeFigure(bodyColor, role='villager') {
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 0.26), skinM); head.position.y = 1.22;
 
   g.add(legL, legR, torso, belt, armL, armR, head);
+
+  // a face: two ink-dot eyes, and often a beard
+  const eyeM = mat(0x241c14);
+  for (const s of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.05, 0.02), eyeM);
+    eye.position.set(s*0.065, 1.25, 0.136);
+    g.add(eye);
+  }
+  if (role !== 'monk' && Math.random() < 0.28) {
+    const beard = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.13, 0.05),
+      mat([0x3a2d20, 0x6b5d4a, 0x8a8578][Math.random()*3|0]));
+    beard.position.set(0, 1.10, 0.125);
+    g.add(beard);
+  }
 
   if (role === 'villager') {
     const v = Math.random();
@@ -1893,11 +2053,98 @@ function makeDeer(buck) {
   }
   head.userData.isHead = true;
   const tail = box(0.09, 0.16, 0.06, new THREE.MeshLambertMaterial({ color:0xe8e2d4 }), 0, 0.98, -0.76);
-  for (const [sx, sz] of [[-0.14,0.32],[0.14,0.32],[-0.14,-0.5],[0.14,-0.5]])
-    g.add(cyl(0.045, 0.055, 0.62, dark, sx, 0.31, sz, 4));
+  // legs pivot at the hip so the walk cycle can swing them
+  const legGeo = new THREE.CylinderGeometry(0.045, 0.055, 0.62, 4);
+  legGeo.translate(0, -0.31, 0);
+  const legs = [];
+  for (const [sx, sz] of [[-0.14,0.32],[0.14,0.32],[-0.14,-0.5],[0.14,-0.5]]) {
+    const leg = new THREE.Mesh(legGeo, dark);
+    leg.position.set(sx, 0.62, sz);
+    legs.push(leg);
+    g.add(leg);
+  }
+  g.userData.legs = legs;   // [frontL, frontR, backL, backR]
   g.add(body, rump, head, tail);
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
   return g;
+}
+function makeBoar() {
+  const g = new THREE.Group();
+  const dark = new THREE.MeshLambertMaterial({ color:0x4a3a2c });
+  const darker = new THREE.MeshLambertMaterial({ color:0x35291e });
+  g.add(box(0.5, 0.5, 0.9, dark, 0, 0.45, 0));
+  g.add(box(0.14, 0.14, 0.72, darker, 0, 0.74, -0.05));   // bristle ridge
+  const head = new THREE.Group();
+  head.position.set(0, 0.5, 0.5);
+  head.add(box(0.36, 0.36, 0.34, dark, 0, 0, 0.1));
+  head.add(box(0.16, 0.15, 0.14, new THREE.MeshLambertMaterial({ color:0x7a5c4a }), 0, -0.08, 0.32));
+  for (const s of [-1, 1]) {
+    const tusk = cone(0.03, 0.12, new THREE.MeshLambertMaterial({ color:0xe8e2d4 }), s*0.11, -0.06, 0.3, 4);
+    tusk.rotation.x = -0.5; head.add(tusk);
+    const ear = cone(0.06, 0.12, darker, s*0.14, 0.22, -0.02, 4);
+    ear.rotation.z = s*0.4; head.add(ear);
+  }
+  head.userData.isHead = true;
+  g.add(head);
+  for (const [sx, sz] of [[-0.16,0.3],[0.16,0.3],[-0.16,-0.3],[0.16,-0.3]])
+    g.add(cyl(0.05, 0.06, 0.34, darker, sx, 0.17, sz, 4));
+  g.add(box(0.05, 0.05, 0.2, darker, 0, 0.6, -0.5));
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+function makeHeron() {
+  const g = new THREE.Group();
+  const grey = new THREE.MeshLambertMaterial({ color:0x9aa4ac });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 5), grey);
+  body.position.y = 0.72; body.scale.set(1, 0.85, 1.4); body.castShadow = true; g.add(body);
+  for (const s of [-1, 1]) g.add(cyl(0.02, 0.02, 0.62, new THREE.MeshLambertMaterial({ color:0x4a4038 }), s*0.06, 0.31, 0, 4));
+  const neck = cyl(0.045, 0.06, 0.5, grey, 0, 1.05, 0.16, 5);
+  neck.rotation.x = 0.25; g.add(neck);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), grey);
+  head.position.set(0, 1.3, 0.26); g.add(head);
+  const beak = cone(0.03, 0.3, new THREE.MeshLambertMaterial({ color:0xd9a44a }), 0, 1.28, 0.44, 4);
+  beak.rotation.x = Math.PI/2; g.add(beak);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+function makeDuck() {
+  const g = new THREE.Group();
+  const hen = Math.random() < 0.5;
+  const bodyM = new THREE.MeshLambertMaterial({ color: hen ? 0x8a7458 : 0x7a6a50 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 5), bodyM);
+  body.position.y = 0.1; body.scale.set(1, 0.75, 1.4); g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5),
+    new THREE.MeshLambertMaterial({ color: hen ? 0x8a7458 : 0x2e5c3a }));
+  head.position.set(0, 0.28, 0.16); g.add(head);
+  const beak = cone(0.03, 0.1, new THREE.MeshLambertMaterial({ color:0xd9a44a }), 0, 0.26, 0.27, 4);
+  beak.rotation.x = Math.PI/2; g.add(beak);
+  return g;
+}
+// smooth shortest-arc turning for wild things — no more chess-piece snaps
+function turnWild(c, targetA, dt, rate) {
+  if (c.dirA === undefined) c.dirA = targetA;
+  let d = targetA - c.dirA;
+  while (d > Math.PI) d -= Math.PI*2;
+  while (d < -Math.PI) d += Math.PI*2;
+  c.dirA += d * Math.min(1, dt * rate);
+  c.grp.rotation.y = c.dirA;
+}
+function deerGait(c, dt, mode) {
+  const legs = c.grp.userData.legs;
+  if (!legs) return;
+  if (mode === 'walk') {
+    // diagonal pairs, gentle amble; body stays level
+    const s = Math.sin(c.bob * 1.1) * 0.45;
+    legs[0].rotation.x = s;  legs[3].rotation.x = s;
+    legs[1].rotation.x = -s; legs[2].rotation.x = -s;
+  } else if (mode === 'bound') {
+    // fore pair and hind pair together — the flying leap
+    const s = Math.sin(c.bob * 1.6);
+    legs[0].rotation.x = legs[1].rotation.x = s * 0.9;
+    legs[2].rotation.x = legs[3].rotation.x = -s * 0.9;
+  } else {
+    for (const l of legs) l.rotation.x += (0 - l.rotation.x) * Math.min(1, dt*8);
+  }
 }
 function makeRabbit() {
   const g = new THREE.Group();
@@ -1967,8 +2214,80 @@ function wildTick(dt) {
         bob:Math.random()*6, wait:Math.random()*2, tgt:null, flee:0, checkT:2+Math.random()*3 });
     }
   }
+  if (maySpawn && state.wild.filter(c => c.kind === 'boar').length < 2) {
+    const spot = wildSpawnSpot();
+    if (spot) {
+      const grp = makeBoar();
+      grp.position.set(spot.x, 0, spot.z);
+      scene.add(grp);
+      let hd = null;
+      grp.traverse(o => { if (o.userData.isHead) hd = o; });
+      state.wild.push({ kind:'boar', x:spot.x, z:spot.z, ax:spot.x, az:spot.z, speed:2.2, grp, head:hd,
+        bob:Math.random()*6, wait:Math.random()*3, tgt:null, graze:0, flee:0, checkT:2+Math.random()*3 });
+    }
+  }
+  if (maySpawn && state.wild.filter(c => c.kind === 'heron').length < 2) {
+    const a = Math.random()*Math.PI*2, rr = LAKE.r * (1.02 + Math.random()*0.1);
+    const x = LAKE.x + Math.sin(a)*rr, z = LAKE.z + Math.cos(a)*rr;
+    if (Math.abs(x) < MAP+40 && Math.abs(z) < MAP+40) {
+      const grp = makeHeron();
+      grp.position.set(x, groundY(x, z), z);
+      grp.rotation.y = Math.random()*Math.PI*2;
+      scene.add(grp);
+      state.wild.push({ kind:'heron', x, z, grp, bob:Math.random()*6,
+        wait:4+Math.random()*8, tgt:null, flee:0, baseY:groundY(x, z), checkT:5 });
+    }
+  }
+  if (maySpawn && state.wild.filter(c => c.kind === 'duck').length < 4) {
+    const a = Math.random()*Math.PI*2, rr = LAKE.r * (0.25 + Math.random()*0.5);
+    const x = LAKE.x + Math.sin(a)*rr, z = LAKE.z + Math.cos(a)*rr;
+    const grp = makeDuck();
+    grp.position.set(x, -0.44, z);
+    scene.add(grp);
+    state.wild.push({ kind:'duck', x, z, grp, bob:Math.random()*6,
+      wait:Math.random()*3, tgt:null, flee:0, checkT:20 });
+  }
   for (const c of [...state.wild]) {
     c.bob += dt * 8;
+    // ducks paddle their pond; herons stand sentry and fly off when disturbed
+    if (c.kind === 'duck') {
+      if (c.wait > 0) { c.wait -= dt; c.grp.position.y = -0.44 + Math.sin(c.bob*0.4)*0.02; continue; }
+      if (!c.tgt || Math.hypot(c.tgt.x-c.x, c.tgt.z-c.z) < 0.3) {
+        const a = Math.random()*Math.PI*2, rr = LAKE.r * (0.2 + Math.random()*0.55);
+        c.tgt = { x: LAKE.x + Math.sin(a)*rr, z: LAKE.z + Math.cos(a)*rr };
+        c.wait = 1 + Math.random()*4;
+        continue;
+      }
+      const ddx = c.tgt.x-c.x, ddz = c.tgt.z-c.z, dL = Math.hypot(ddx, ddz) || 1;
+      c.x += ddx/dL * 1.1 * dt; c.z += ddz/dL * 1.1 * dt;
+      c.grp.position.set(c.x, -0.44 + Math.sin(c.bob*0.4)*0.02, c.z);
+      turnWild(c, Math.atan2(ddx, ddz), dt, 4);
+      continue;
+    }
+    if (c.kind === 'heron') {
+      let near = false;
+      for (const arr of [state.villagers, state.bandits, state.guards])
+        for (const v of arr) if (Math.hypot(v.x-c.x, v.z-c.z) < 9) { near = true; break; }
+      if (near && c.flee <= 0) c.flee = 1.6;
+      if (c.flee > 0) {
+        // takes wing: rises, glides off, and is gone
+        c.flee -= dt;
+        c.grp.position.y += dt * 5;
+        c.grp.position.x = c.x += Math.sin(c.grp.rotation.y) * 7 * dt;
+        c.grp.position.z = c.z += Math.cos(c.grp.rotation.y) * 7 * dt;
+        if (c.flee <= 0) removeWild(c);
+        continue;
+      }
+      if (c.wait > 0) { c.wait -= dt; continue; }
+      // a slow deliberate step along the shore
+      const a = Math.atan2(c.x - LAKE.x, c.z - LAKE.z) + (Math.random()-0.5)*0.5;
+      c.x = LAKE.x + Math.sin(a) * LAKE.r * 1.05;
+      c.z = LAKE.z + Math.cos(a) * LAKE.r * 1.05;
+      c.grp.position.set(c.x, groundY(c.x, c.z), c.z);
+      c.grp.rotation.y = Math.random()*Math.PI*2;
+      c.wait = 5 + Math.random()*9;
+      continue;
+    }
     // walls may have grown around the meadow — wild things slip away
     c.checkT -= dt;
     if (c.checkT <= 0) {
@@ -1976,7 +2295,7 @@ function wildTick(dt) {
       if (wardDepth(c.x, c.z) > 0) { removeWild(c); continue; }
     }
     // spook check
-    const scare = c.kind === 'deer' ? 10 : 6;
+    const scare = c.kind === 'deer' ? 10 : c.kind === 'boar' ? 7 : 6;
     let threat = null, best = scare;
     for (const arr of [state.villagers, state.bandits, state.guards]) {
       for (const v of arr) {
@@ -1998,17 +2317,21 @@ function wildTick(dt) {
       const nx = c.x + c.fdx * spd * dt, nz = c.z + c.fdz * spd * dt;
       if (Math.abs(nx) < MAP-2 && Math.abs(nz) < MAP-2) { c.x = nx; c.z = nz; }
       else c.flee = 0;
-      c.grp.position.set(c.x, Math.abs(Math.sin(c.bob*1.6))*0.22, c.z);
-      c.grp.rotation.y = Math.atan2(c.fdx, c.fdz);
+      c.grp.position.set(c.x, Math.abs(Math.sin(c.bob*1.6))*0.26, c.z);
+      turnWild(c, Math.atan2(c.fdx, c.fdz), dt, 10);
+      if (c.kind === 'deer') deerGait(c, dt, 'bound');
       if (c.flee <= 0 && Math.random() < 0.35) removeWild(c);   // sometimes they're gone for good
       continue;
     }
-    // idle graze / hop about
+    // idle graze / root / hop about
     if (c.wait > 0) {
       c.wait -= dt;
-      if (c.kind === 'deer' && c.head) {
+      if (c.kind === 'deer') deerGait(c, dt, 'rest');
+      if (c.head) {
         c.graze += dt;
-        c.head.rotation.x = Math.min(0.9, c.graze * 1.4);   // head dips to the grass
+        // deer graze; boars root — nose down, with a busy little shake
+        c.head.rotation.x = Math.min(c.kind === 'boar' ? 0.55 : 0.9, c.graze * 1.4)
+          + (c.kind === 'boar' ? Math.sin(c.bob*2.2) * 0.06 : 0);
       }
       c.grp.position.y = 0;
       continue;
@@ -2022,8 +2345,10 @@ function wildTick(dt) {
     const dx = c.tgt.x - c.x, dz = c.tgt.z - c.z;
     const L = Math.hypot(dx, dz) || 1;
     c.x += dx/L * c.speed * dt; c.z += dz/L * c.speed * dt;
+    // deer amble flat-backed with swinging legs; rabbits hop
     c.grp.position.set(c.x, c.kind === 'rabbit' ? Math.abs(Math.sin(c.bob*1.3))*0.14 : 0, c.z);
-    c.grp.rotation.y = Math.atan2(dx, dz);
+    turnWild(c, Math.atan2(dx, dz), dt, 6);
+    if (c.kind === 'deer') deerGait(c, dt, 'walk');
   }
 }
 function removeWild(c) {
@@ -3008,22 +3333,51 @@ function buildTeleReport() {
 }
 
 // ---------------------------------------------------------------- founding charter
+// a proper guided tutorial: one active step at a time, spelled out plainly,
+// with the relevant palette tab glowing. Skippable for those who know the way.
+const peacefulNow = () => DIFF[state.difficulty].raid <= 0;
 const OBJECTIVES = [
-  { id:'keep',   label:'Raise your Keep — choose good ground', test:() => state.buildings.some(b => b.type === 'keep') },
-  { id:'wall',   label:'Ring the Keep with a wall (WALLS tab)', test:() => state.buildings.some(b => b.type==='keep' && b.depth > 0) },
-  { id:'gate',   label:'Cut a gate through it (WALLS tab)',     test:() => state.walls.some(w => w.gates.some(g => !g.breach)) },
-  { id:'houses', label:'Raise two houses in the ward',       test:() => state.buildings.filter(b => !b.ruined && b.type==='house' && b.depth>0).length >= 2 },
-  { id:'farm',   label:'Plant a farm outside the walls',     test:() => state.buildings.some(b => !b.ruined && b.type==='farm') },
-  { id:'raid',   label:'Survive the first raid',             test:() => state.raidNum >= 1 && state.bandits.length === 0 },
+  { id:'keep',   label:'Raise your Keep', tab:null,
+    hint:'Click any open ground to set your Keep down. Near trees and rock is wise — woodcutters and quarries must stand close to them.',
+    test:() => state.buildings.some(b => b.type === 'keep') },
+  { id:'wall',   label:'Ring the Keep with a wall', tab:'WALLS',
+    hint:'In the glowing WALLS tab, pick Stone Wall. Click corners around your Keep, then click your first post again (or press Enter) to close the ring. Everything inside becomes a WARD.',
+    test:() => state.buildings.some(b => b.type==='keep' && b.depth > 0) },
+  { id:'gate',   label:'Cut a gate through it', tab:'WALLS',
+    hint:'Still in WALLS: pick Wooden Gate and click anywhere on your wall. Your folk pull the lever beside it to pass — raiders cannot.',
+    test:() => state.walls.some(w => w.gates.some(g => !g.breach)) },
+  { id:'houses', label:'Raise two houses in the ward', tab:'TOWN',
+    hint:'Open the TOWN tab and place two Houses inside your walls. Homes can only stand inside a ward — folk will begin to settle.',
+    test:() => state.buildings.filter(b => !b.ruined && b.type==='house' && b.depth>0).length >= 2 },
+  { id:'farm',   label:'Plant a farm outside the walls', tab:'WORKS',
+    hint:'Open the WORKS tab and plant a Farm on open ground beyond the walls. Fields feed the town — and follow the seasons.',
+    test:() => state.buildings.some(b => !b.ruined && b.type==='farm') },
+  { id:'road',   label:'Lay a road from your gate', tab:'ROADS',
+    hint:'Open the ROADS tab, pick Dirt Path, and drag from your gate toward the farm. Folk walk faster on roads — better roads, faster still.',
+    test:() => state.roads.length >= 4 },
+  { id:'raid',
+    label:() => peacefulNow() ? 'Grow to 12 folk' : 'Survive the first raid',
+    tab:null,
+    hint:() => peacefulNow()
+      ? 'Homes fill as long as there is food. Keep the granary ahead of winter and the town will grow on its own.'
+      : 'Raiders muster once you have walls worth plundering. Keep folk inside, let the gate hold — and watch the countdown in the top bar.',
+    test:() => peacefulNow() ? state.pop >= 12 : (state.raidNum >= 1 && state.bandits.length === 0) },
 ];
 const objDone = {};
-let objAllDoneAt = 0, objT = 0;
+let objAllDoneAt = 0, objT = 0, activeObjTab = null;
 function updateObjectives(silent=false) {
   if (!state.started || state.over) return;
+  const el = $('objectives');
+  if (state.tutSkip) { el.style.display = 'none'; if (activeObjTab) { activeObjTab = null; renderPalette(); } return; }
   let all = true;
   for (const o of OBJECTIVES) {
     if (!objDone[o.id]) {
-      if (o.test()) { objDone[o.id] = true; teleEv('charter', o.id); if (!silent) { msg(`✔ ${o.label}`, 'good'); AudioSys.play('chime'); } }
+      if (o.test()) {
+        objDone[o.id] = true;
+        teleEv('charter', o.id);
+        const lbl = typeof o.label === 'function' ? o.label() : o.label;
+        if (!silent) { msg(`✔ ${lbl}`, 'good'); AudioSys.play('chime'); }
+      }
       else all = false;
     }
   }
@@ -3031,11 +3385,26 @@ function updateObjectives(silent=false) {
     objAllDoneAt = state.time || 0.001;
     if (!silent) msg('The charter is fulfilled. Grow rich behind your walls.', 'good');
   }
-  const el = $('objectives');
   if (objAllDoneAt && state.time - objAllDoneAt > 12) { el.style.display = 'none'; return; }
   el.style.display = 'block';
-  el.innerHTML = '<h4>FOUNDING CHARTER</h4>' + OBJECTIVES.map(o =>
-    `<div class="obj ${objDone[o.id]?'done':''}"><span class="tick">${objDone[o.id]?'✔':'▢'}</span><span class="lbl">${o.label}</span></div>`).join('');
+  const active = OBJECTIVES.find(o => !objDone[o.id]);
+  const wantTab = active ? active.tab : null;
+  if (wantTab !== activeObjTab) { activeObjTab = wantTab; renderPalette(); }
+  el.innerHTML = '<h4>FOUNDING CHARTER</h4>' + OBJECTIVES.map(o => {
+    const lbl = typeof o.label === 'function' ? o.label() : o.label;
+    const isActive = o === active;
+    const hint = isActive ? (typeof o.hint === 'function' ? o.hint() : o.hint) : null;
+    return `<div class="obj ${objDone[o.id] ? 'done' : isActive ? 'active' : 'later'}">` +
+      `<span class="tick">${objDone[o.id] ? '✔' : isActive ? '➤' : '▢'}</span><span class="lbl">${lbl}</span></div>` +
+      (hint ? `<div class="objhint">${hint}</div>` : '');
+  }).join('') + (all ? '' : `<div id="obj-skip">skip the tutorial ›</div>`);
+  const skip = document.getElementById('obj-skip');
+  if (skip) skip.onclick = () => {
+    state.tutSkip = true;
+    msg('Charter set aside. The Almanac (B) remembers everything it taught.', 'dim');
+    updateObjectives(true);
+    saveGame();
+  };
 }
 
 const TOOL_HINTS = {
@@ -3090,6 +3459,7 @@ function renderPalette() {
     if (!anyOpen) return;   // whole trades appear as the town earns them
     const el = document.createElement('div');
     el.className = 'ptab' + (i === activeTab ? ' on' : '');
+    if (tb.nm === activeObjTab && i !== activeTab) el.classList.add('glow');   // the tutorial points here
     el.textContent = tb.nm;
     el.onclick = () => { activeTab = i; renderPalette(); AudioSys.play('click'); };
     tabRow.appendChild(el);
@@ -3134,6 +3504,18 @@ function buildingInfoHTML(b) {
   if (!b.ruined && b.type === 'beacon') html += `\nthe watch lights it early — raid warning 45s → 75s`;
   if (!b.ruined && b.buildT >= 1 && JOB_SLOTS[b.type])
     html += `\n<span class="${(b.workers || 0) > 0 ? 'safe' : 'unsafe'}">⚒ ${b.workers || 0}/${b.jobs || JOB_SLOTS[b.type]} workers${(b.workers || 0) === 0 ? ' — idle, does nothing' : ''}</span>`;
+  // an upgrade path, priced and one click away
+  const up = !b.ruined && b.buildT >= 1 && !b.onFire ? UPGRADES[b.type] : null;
+  if (up && !toolLocked(up.to)) {
+    const reqOK = !up.req || up.req(b);
+    const afford = canAfford(up.cost);
+    if (reqOK) {
+      html += `\n<button class="upbtn${afford ? '' : ' cant'}" data-up="1">⬆ Upgrade to ${BUILD_DEFS[up.to].nm} — ${costStr(up.cost)}</button>`;
+      if (!afford) html += `<span class="edictdesc"> gather more first</span>`;
+    } else {
+      html += `\n<span class="unsafe">⬆ ${BUILD_DEFS[up.to].nm} possible — but ${up.why}</span>`;
+    }
+  }
   if (!b.ruined && b.type === 'townhall' && b.buildT >= 1) {
     html += (b.workers || 0) > 0
       ? `\n<span class="safe">the council sits — proclaim edicts below</span>`
@@ -3171,6 +3553,8 @@ function selectBuilding(b) {
 $('bcard-x').onclick = () => selectBuilding(null);
 // edict toggles live inside the re-rendered card body — delegate the clicks
 $('bcard-body').addEventListener('click', ev => {
+  const ub = ev.target.closest('[data-up]');
+  if (ub && selB) { tryUpgrade(selB); selectBuilding(selB); return; }
   const btn = ev.target.closest('[data-edict]');
   if (!btn || !selB || selB.type !== 'townhall') return;
   const k = btn.dataset.edict;
@@ -3412,29 +3796,59 @@ function rankTick() {
   }
 }
 
+// growth paths: houses ripen on their own in well-served wards, and any of
+// these can be bought outright from the building card
+const UPGRADES = {
+  hovel:     { to:'house',      cost:{wood:15, gold:5} },
+  house:     { to:'townhouse',  cost:{wood:30, stone:15, gold:20}, req: b => b.depth >= 1, why:'needs a ward' },
+  townhouse: { to:'manor',      cost:{wood:30, stone:30, gold:50}, req: b => b.depth >= 2, why:'needs a ward within a ward' },
+  granary:   { to:'greatstore', cost:{wood:25, stone:30, gold:25} },
+  watchpost: { to:'tower',      cost:{wood:10, stone:25} },
+};
+function growInto(b, into, note) {
+  state.upgCool = 12;
+  scene.remove(b.group);
+  disposeGroup(b.group);
+  b.type = into;
+  b.hp = b.maxHp = BUILD_DEFS[into].hp;
+  b.group = buildMesh(into, b.x, b.z);
+  b.group.position.set(b.x, 0, b.z);
+  b.group.rotation.y += b.rot || 0;
+  wireGroup(b, b.group);
+  scene.add(b.group);
+  b.buildT = 0;
+  b.upT = 0;
+  b.day = state.day;   // renovation resets the moss clock
+  b._mossed = false;
+  dustBurst(b.x, b.z, 2, 10);
+  AudioSys.play('thunk');
+  teleEv(into);
+  msg(note, 'good');
+  redrawTownGround();
+  saveGame();
+}
+function tryUpgrade(b) {
+  const up = UPGRADES[b.type];
+  if (!up || b.ruined || b.onFire || b.buildT < 1) return;
+  if (toolLocked(up.to)) { msg(`${BUILD_DEFS[up.to].nm} unlocks at a higher rank.`, 'warn'); return; }
+  if (up.req && !up.req(b)) { msg(`Cannot upgrade — ${up.why}.`, 'warn'); return; }
+  if (!canAfford(up.cost)) { msg('Not enough materials for the upgrade.', 'warn'); return; }
+  // a bigger footprint must still fit its plot
+  const nd = BUILD_DEFS[up.to], od = BUILD_DEFS[b.type];
+  if (nd.w > od.w || nd.d > od.d) {
+    const clash = state.buildings.some(o => o !== b && !o.ruined &&
+      Math.abs(o.x - b.x) < (BUILD_DEFS[o.type].w + nd.w)/2 + 0.2 &&
+      Math.abs(o.z - b.z) < (BUILD_DEFS[o.type].d + nd.d)/2 + 0.2);
+    if (clash) { msg('No room — the larger building would crowd its neighbour.', 'warn'); return; }
+  }
+  pay(up.cost);
+  growInto(b, up.to, `${BUILD_DEFS[b.type].nm} rebuilt as a ${BUILD_DEFS[up.to].nm}.`);
+}
+
 // houses in well-planned wards grow into townhouses — density is the reward
 function upgradeTick(dt) {
   state.upgCool -= dt;
-  const grow = (b, into, note) => {
-    state.upgCool = 12;
-    scene.remove(b.group);
-    disposeGroup(b.group);
-    b.type = into;
-    b.hp = b.maxHp = BUILD_DEFS[into].hp;
-    b.group = buildMesh(into, b.x, b.z);
-    b.group.position.set(b.x, 0, b.z);
-    b.group.rotation.y += b.rot || 0;
-    wireGroup(b, b.group);
-    scene.add(b.group);
-    b.buildT = 0;
-    b.upT = 0;
-    dustBurst(b.x, b.z, 2, 10);
-    AudioSys.play('thunk');
-    teleEv(into);
-    msg(note, 'good');
-    redrawTownGround();
-    saveGame();
-  };
+  const grow = growInto;
   for (const b of state.buildings) {
     if (b.ruined || b.onFire || b.buildT < 1 || b.depth < 1) continue;
     if (b.type === 'house') {
@@ -4298,7 +4712,7 @@ function saveGame(key = 'bulwark-save') {
     localStorage.setItem(key, JSON.stringify({
       v: 3,
       gold:state.gold, wood:state.wood, stone:state.stone, food:state.food,
-      townName:state.townName, seed:state.seed, regionNm:state.regionNm,
+      townName:state.townName, seed:state.seed, regionNm:state.regionNm, tutSkip:!!state.tutSkip,
       difficulty:state.difficulty, roads:state.roads,
       pop:state.pop, maxPop:state.maxPop, rankIdx:state.rankIdx, time:state.time, raidNum:state.raidNum,
       sick:state.sick||0, edicts:state.edicts||{},
@@ -4320,6 +4734,7 @@ function loadGame() {
   state.difficulty = DIFF[s.difficulty] ? s.difficulty : 'standard';
   state.sick = s.sick || 0;
   state.edicts = s.edicts || {};
+  state.tutSkip = !!s.tutSkip;
   scatterWorld(state.seed);
   state.roads = (s.roads || []).map(r2 => r2.length === 2 ? [r2[0], r2[1], 'road'] : r2);
   roadSet.clear();
@@ -4970,8 +5385,14 @@ const ALM_DESC = {
   flagroad:'Flagstones. ×1.5 speed — homes fronting them gain prestige.',
   moat:'Dug water. Everything wades at half pace — dig it in a raider’s path.',
   hoardings:'Timber galleries on a wall. Its sentries shoot raiders below.',
-  hovel:'The humblest roof — 2 folk. No services needed.',
-  house:'A family home — 4 folk. With a well and market nearby it grows into a townhouse.',
+  hovel:'The humblest roof — 2 folk. Upgrade it to a house from its card.',
+  house:'A family home — 4 folk. With a well and market nearby it grows into a townhouse on its own — or pay to rebuild it at once.',
+  longhouse:'A timber hall housing six under one long roof.',
+  rowhouse:'A tall burgher block — seven folk on a modest plot.',
+  woodpile:'Split and stacked. The town looks warmer for it.',
+  cart:'A loaded handcart, resting between errands.',
+  signpost:'Fingerposts for travellers. Purely for the look.',
+  lamppost:'Lights its corner come dusk.',
   townhouse:'A grown house — 8 folk. In a deep ward with full services it becomes a manor.',
   manor:'The pinnacle — 12 folk and handsome taxes. Only wards this rich grow one.',
   well:'Waters homes within its reach (tax ×1.15) — and the bucket line fights fires.',
@@ -5127,6 +5548,7 @@ window.BULWARK = {
   save: (k) => saveGame(k),
   seasonOf,
   setEdict, refreshJobs, workforce, staffEff, edictOn, isFestivalDay, isHolyDay,
+  upgrade: (b) => tryUpgrade(b),
   // debug capture: render into a target and read pixels — the canvas back
   // buffer is cleared after present on Windows, so toDataURL comes back blank
   shot: (q) => {

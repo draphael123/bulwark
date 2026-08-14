@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BULWARK Icon Lab</title>
+<style>
+  body { background:#0d0a06; color:#e8dcc2; font-family:Georgia,serif; margin:0; padding:40px 20px; }
+  h1 { text-align:center; color:#d9a44a; letter-spacing:6px; }
+  p.note { text-align:center; color:#8a7a58; max-width:600px; margin:6px auto 30px; }
+  .row { display:flex; justify-content:center; gap:26px; margin-bottom:34px; flex-wrap:wrap; }
+  .style { background:#1b140c; border:1px solid #4a3a20; border-radius:12px; padding:18px 22px; }
+  .style h2 { text-align:center; font-size:15px; letter-spacing:3px; color:#cbb98f; margin:0 0 14px; }
+  .icons { display:grid; grid-template-columns:repeat(3, 74px); gap:10px; }
+  .cell { width:74px; height:74px; background:#241a0e; border:1px solid #3a2d18; border-radius:9px;
+          display:flex; align-items:center; justify-content:center; }
+  .cell svg { width:52px; height:52px; }
+  .cap { text-align:center; font-size:11px; color:#8a7a58; margin-top:10px; }
+  .mini { display:flex; gap:5px; justify-content:center; margin-top:12px; }
+  .mini .cell { width:34px; height:34px; border-radius:6px; }
+  .mini .cell svg { width:24px; height:24px; }
+</style>
+</head>
+<body>
+<h1>ICON LAB</h1>
+<p class="note">The same six tools in three styles, at palette size and small size.
+Pick a column — every icon, panel border, and the wordmark will follow it.</p>
+
+<div class="row">
+
+  <!-- STYLE A: WOODCUT -->
+  <div class="style">
+    <h2>A · WOODCUT</h2>
+    <div class="icons" id="A"></div>
+    <div class="mini" id="Am"></div>
+    <div class="cap">ink-line engraving, hatched shading</div>
+  </div>
+
+  <!-- STYLE B: HAND-PAINTED -->
+  <div class="style">
+    <h2>B · HAND-PAINTED</h2>
+    <div class="icons" id="B"></div>
+    <div class="mini" id="Bm"></div>
+    <div class="cap">warm fills, thick friendly outlines</div>
+  </div>
+
+  <!-- STYLE C: HERALDIC -->
+  <div class="style">
+    <h2>C · HERALDIC</h2>
+    <div class="icons" id="C"></div>
+    <div class="mini" id="Cm"></div>
+    <div class="cap">gold silhouettes, banner-flat</div>
+  </div>
+
+</div>
+
+<script>
+const INK = '#2a1f12', PARCH = '#d9c9a8', GOLD = '#d9a44a';
+
+// each icon returns inner SVG for a 64x64 viewBox, per style
+const ICONS = {
+  wall: {
+    A: `<g stroke="${INK}" stroke-width="2.6" fill="none">
+        <path d="M8 52 V26 H16 V20 H24 V26 H30 V20 H38 V26 H44 V20 H52 V26 H56 V52 Z"/>
+        <path d="M8 38 H56 M22 26 V38 M42 26 V38 M14 38 V52 M32 38 V52 M50 38 V52" stroke-width="1.6"/></g>`,
+    B: `<path d="M8 52 V26 H16 V20 H24 V26 H30 V20 H38 V26 H44 V20 H52 V26 H56 V52 Z" fill="#a8a094" stroke="${INK}" stroke-width="3"/>
+        <path d="M8 38 H56" stroke="${INK}" stroke-width="2" opacity=".5"/>`,
+    C: `<path d="M8 52 V26 H16 V20 H24 V26 H30 V20 H38 V26 H44 V20 H52 V26 H56 V52 Z" fill="${GOLD}"/>`,
+  },
+  gate: {
+    A: `<g stroke="${INK}" stroke-width="2.6" fill="none">
+        <path d="M10 52 V24 Q32 8 54 24 V52"/>
+        <path d="M18 52 V30 Q32 18 46 30 V52" />
+        <path d="M24 32 V52 M32 28 V52 M40 32 V52 M20 40 H44" stroke-width="1.6"/></g>`,
+    B: `<path d="M10 52 V24 Q32 8 54 24 V52 H46 V30 Q32 20 18 30 V52 Z" fill="#8f8778" stroke="${INK}" stroke-width="3"/>
+        <path d="M24 33 V52 M32 30 V52 M40 33 V52" stroke="${INK}" stroke-width="2.4"/>`,
+    C: `<path d="M10 52 V24 Q32 8 54 24 V52 H44 V30 Q32 21 20 30 V52 Z" fill="${GOLD}"/>
+        <path d="M27 34 V52 M37 34 V52" stroke="${GOLD}" stroke-width="3"/>`,
+  },
+  house: {
+    A: `<g stroke="${INK}" stroke-width="2.6" fill="none">
+        <path d="M12 30 L32 12 L52 30 V52 H12 Z"/>
+        <path d="M12 30 H52 M26 52 V38 H38 V52 M16 34 L24 34 M40 34 L48 34" stroke-width="1.6"/></g>`,
+    B: `<path d="M12 30 L32 12 L52 30 V52 H12 Z" fill="${PARCH}" stroke="${INK}" stroke-width="3"/>
+        <path d="M10 31 L32 11 L54 31" fill="none" stroke="#a2522f" stroke-width="6"/>
+        <rect x="27" y="38" width="10" height="14" fill="#6e4a2a"/>`,
+    C: `<path d="M10 32 L32 12 L54 32 V52 H10 Z" fill="${GOLD}"/>
+        <rect x="27" y="38" width="10" height="14" fill="#241a0e"/>`,
+  },
+  farm: {
+    A: `<g stroke="${INK}" stroke-width="2.2" fill="none">
+        <path d="M16 52 V30 M32 52 V26 M48 52 V30"/>
+        <path d="M16 34 Q10 30 10 24 M16 34 Q22 30 22 24 M32 30 Q26 26 26 20 M32 30 Q38 26 38 20 M48 34 Q42 30 42 24 M48 34 Q54 30 54 24"/>
+        <path d="M8 52 H56" stroke-width="2.6"/></g>`,
+    B: `<path d="M8 52 H56" stroke="${INK}" stroke-width="3"/>
+        <g stroke="#b5a33c" stroke-width="3.4" fill="none">
+        <path d="M16 52 V30 M32 52 V26 M48 52 V30"/></g>
+        <g fill="#d9c05a"><ellipse cx="16" cy="26" rx="5" ry="8"/><ellipse cx="32" cy="22" rx="5" ry="8"/><ellipse cx="48" cy="26" rx="5" ry="8"/></g>`,
+    C: `<g fill="${GOLD}"><rect x="14" y="30" width="4" height="22"/><rect x="30" y="26" width="4" height="26"/><rect x="46" y="30" width="4" height="22"/>
+        <ellipse cx="16" cy="24" rx="6" ry="9"/><ellipse cx="32" cy="20" rx="6" ry="9"/><ellipse cx="48" cy="24" rx="6" ry="9"/></g>`,
+  },
+  tower: {
+    A: `<g stroke="${INK}" stroke-width="2.6" fill="none">
+        <path d="M22 52 V20 H26 V16 H30 V20 H34 V16 H38 V20 H42 V52 Z"/>
+        <path d="M22 34 H42 M28 40 H36 M28 40 V52 H36 V40" stroke-width="1.6"/>
+        <path d="M42 22 L54 26 L42 30" /></g>`,
+    B: `<path d="M22 52 V20 H26 V16 H30 V20 H34 V16 H38 V20 H42 V52 Z" fill="#a8a094" stroke="${INK}" stroke-width="3"/>
+        <path d="M42 22 L54 26 L42 30 Z" fill="#a3542a" stroke="${INK}" stroke-width="2"/>
+        <rect x="28" y="40" width="8" height="12" fill="${INK}"/>`,
+    C: `<path d="M22 52 V20 H26 V16 H30 V20 H34 V16 H38 V20 H42 V52 Z" fill="${GOLD}"/>
+        <path d="M42 22 L54 26 L42 30 Z" fill="${GOLD}"/>`,
+  },
+  demolish: {
+    A: `<g stroke="${INK}" stroke-width="2.6" fill="none">
+        <path d="M20 44 L40 24"/>
+        <path d="M34 14 L50 30 L44 36 L28 20 Z"/>
+        <path d="M16 48 L24 40" stroke-width="4"/></g>`,
+    B: `<path d="M18 46 L38 26" stroke="#6e4a2a" stroke-width="6" stroke-linecap="round"/>
+        <path d="M34 14 L50 30 L42 38 L26 22 Z" fill="#8f8778" stroke="${INK}" stroke-width="3"/>`,
+    C: `<path d="M18 46 L36 28" stroke="${GOLD}" stroke-width="6" stroke-linecap="round"/>
+        <path d="M32 14 L50 32 L42 40 L24 22 Z" fill="${GOLD}"/>`,
+  },
+};
+
+for (const style of ['A','B','C']) {
+  const grid = document.getElementById(style);
+  const mini = document.getElementById(style + 'm');
+  for (const name of ['wall','gate','house','farm','tower','demolish']) {
+    for (const target of [grid, mini]) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.innerHTML = `<svg viewBox="0 0 64 64">${ICONS[name][style]}</svg>`;
+      target.appendChild(cell);
+    }
+  }
+}
+</script>
+</body>
+</html>

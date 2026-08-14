@@ -18,12 +18,15 @@ function runTests() {
   if (S.started) return { error: 'reload the page first — tests need a fresh, un-started game' };
   try { localStorage.clear(); } catch (e) {}
 
-  // ---- boot & founding
+  // ---- boot & founding (the Keep is raised by hand now)
   B.start();
-  ok('start places exactly the keep', S.buildings.length === 1 && S.buildings[0].type === 'keep');
+  ok('a new town begins with bare ground', S.buildings.length === 0);
   ok('town gets a generated name', !!S.townName && S.townName.length > 2);
   ok('region chosen and seeded', !!S.regionNm && !!S.seed);
   ok('charter renders', (document.getElementById('objectives').textContent || '').includes('FOUNDING'));
+  const keep = B.place('keep', 0, 0);
+  ok('the Keep is raised by hand', !!keep && S.buildings[0].type === 'keep');
+  ok('only one Keep allowed', !B.place('keep', 20, 20));
   S.stone += 2000; S.wood += 1000; S.gold += 500;
 
   // ---- rank locks
@@ -132,6 +135,13 @@ function runTests() {
   B.removeWallAt(0, -16);
   ok('tearing down the ring cascades its connector', S.walls.length <= wallsWith - 2);
   ok('demolition refunds stone', S.stone > stoneBefore);
+
+  // ---- roads
+  S.stone = Math.max(S.stone, 10);
+  const stoneR = S.stone;
+  const beforeRoads = S.roads.length;
+  for (let i = 0; i < 4; i++) B.paintRoad(40 + i*2, 40);
+  ok('roads paint and charge stone', S.roads.length === beforeRoads + 4 && S.stone < stoneR);
 
   // ---- telemetry
   const rep = B.teleReport();

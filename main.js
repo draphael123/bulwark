@@ -26,13 +26,14 @@ const BUILD_DEFS = {
   keep:       { nm:'Keep',       ico:'🏰', w:6,  d:6,  hp:400, cost:{},                   popCap:8 },
 };
 // walls first, then the town: the toolbar teaches the build order.
-// digits 1-9,0 map to the first ten tools; barracks lives on B, demolish on X
-const TOOL_ORDER = ['wall','gate','house','well','granary','farm','woodcutter','quarry','market','tower','barracks','demolish'];
+// digits 1-9,0 map to the first ten tools; tower=T, barracks=B, demolish=X
+const TOOL_ORDER = ['wall','gate','road','house','well','granary','farm','woodcutter','quarry','market','tower','barracks','demolish'];
+const ROAD_COST = 0.5;   // stone per road step
 const GATE_COST = 10; // stone, for the Gate tool
 
 // ---------------------------------------------------------------- state
 const RANKS = [
-  { pop: 0,  nm: 'Hamlet',  unlocks: ['wall','gate','house','farm','woodcutter','demolish'] },
+  { pop: 0,  nm: 'Hamlet',  unlocks: ['wall','gate','road','house','farm','woodcutter','demolish'] },
   { pop: 12, nm: 'Village', unlocks: ['well','quarry','granary'] },
   { pop: 20, nm: 'Town',    unlocks: ['market','tower'] },
   { pop: 32, nm: 'City',    unlocks: ['barracks'] },
@@ -58,13 +59,19 @@ const TOWN_SUF = ['mere','ford','holt','wick','stead','bury','dale','march','hav
 const FOLK_NAMES = ['Aldith','Bertram','Cedd','Duna','Edric','Frida','Godwin','Hilda','Isolde','Jorund','Kenna','Leofric','Maud','Nesta','Osric','Petra','Quill','Rowena','Sæwine','Tilla','Ulf','Verity','Wystan','Ysolt'];
 const FOLK_TRADES = ['weaver','cooper','baker','mason','smith','tanner','carter','brewer','shepherd','fletcher','chandler','miller'];
 const RANK_BANNER_COLORS = [0xd9a44a, 0x7aa348, 0x4a7ac3, 0xa34ac3];
+const DIFF = {
+  peaceful: { nm:'Peaceful', raid:0,   fire:0,   res:1.3  },
+  standard: { nm:'Standard', raid:1,   fire:1,   res:1    },
+  harsh:    { nm:'Harsh',    raid:1.6, fire:1.5, res:0.85 },
+};
 
 const state = {
   gold:100, wood:120, stone:155, food:60,
   townName:'', pop:6, maxPop:6, rankIdx:0, time:0, day:1,
   buildings:[],       // {type,x,z,hp,maxHp,depth,ruined,group,hitFlash}
   walls:[],           // {poly, path, closed, gates, group}
-  bandits:[], guards:[], arrows:[], villagers:[], caravans:[],
+  bandits:[], guards:[], arrows:[], villagers:[], caravans:[], roads:[],
+  difficulty:'standard',
   fireCool:150, caravanT:45, upgCool:0,
   raidTimer:150, raidEdge:null, raidNum:0,
   over:false, started:false,
@@ -87,7 +94,7 @@ scene.fog = new THREE.Fog(0x86a3c3, 200, 560);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 1, 800);
 const camTarget = new THREE.Vector3(0, 0, 0);
-let camYaw = Math.PI * 0.25, camPitch = 0.9, camDist = 90;
+let camYaw = Math.PI * 0.25, camPitch = 0.9, camDist = 62;
 function updateCamera() {
   camPitch = Math.max(0.35, Math.min(1.35, camPitch));
   camDist  = Math.max(25, Math.min(220, camDist));
@@ -218,6 +225,47 @@ wearMesh.position.y = 0.03;
 wearMesh.renderOrder = 1;
 scene.add(wearMesh);
 let wearDirty = false, wearUp = 0;
+// roads: player-laid cobbles on a 2u grid — folk walk faster on them
+const roadSet = new Set();
+const roadKey = (x, z) => `${Math.round(x/2)*2},${Math.round(z/2)*2}`;
+function stampRoadCell(gx, gz) {
+  const u = (gx + WEAR_EXTENT) / (WEAR_EXTENT*2) * WEAR_SIZE;
+  const v = (gz + WEAR_EXTENT) / (WEAR_EXTENT*2) * WEAR_SIZE;
+  const r = 2.5 / (WEAR_EXTENT*2) * WEAR_SIZE;
+  wearCtx.globalAlpha = 0.95;
+  wearCtx.fillStyle = '#8f897b';
+  wearCtx.beginPath();
+  wearCtx.arc(u, v, r, 0, Math.PI*2);
+  wearCtx.fill();
+  wearCtx.globalAlpha = 0.6;
+  wearCtx.fillStyle = '#6e6a60';
+  const h = Math.abs(Math.sin(gx*12.9 + gz*78.2) * 43758) % 1;
+  for (let i = 0; i < 3; i++) {
+    const a = h*6.28 + i*2.1;
+    wearCtx.beginPath();
+    wearCtx.arc(u + Math.cos(a)*r*0.45, v + Math.sin(a)*r*0.45, r*0.18, 0, Math.PI*2);
+    wearCtx.fill();
+  }
+  wearCtx.globalAlpha = 1;
+  wearDirty = true;
+}
+function paintRoadAt(wx, wz) {
+  if (Math.abs(wx) > MAP || Math.abs(wz) > MAP) return;
+  const gx = Math.round(wx/2)*2, gz = Math.round(wz/2)*2;
+  const key = `${gx},${gz}`;
+  if (roadSet.has(key)) return;
+  if (state.stone < ROAD_COST) {
+    state._roadMsgT = (state._roadMsgT || 0) - 1;
+    if (state._roadMsgT <= 0) { state._roadMsgT = 40; msg('Not enough stone for more road.', 'warn'); }
+    return;
+  }
+  state.stone -= ROAD_COST;
+  roadSet.add(key);
+  state.roads.push([gx, gz]);
+  stampRoadCell(gx, gz);
+}
+function onRoad(x, z) { return roadSet.has(roadKey(x, z)); }
+
 // soft dark blob that seats a building into the land
 function stampFoundation(x, z, w, d) {
   if (Math.abs(x) > WEAR_EXTENT || Math.abs(z) > WEAR_EXTENT) return;
@@ -1265,6 +1313,7 @@ function refreshDepths() {
 // ---------------------------------------------------------------- placement + tools
 let tool = null;                 // current tool key or null
 let ghost = null;                // ghost mesh group
+let ghostRot = 0;                // R rotates placement by quarter turns
 let wallDraft = [];              // verts while drawing a wall
 let startAttach = null;          // wallSnap result where the draft began on a wall
 let wallPreview = new THREE.Group();
@@ -1320,6 +1369,7 @@ function placementCheck(type, x, z) {
   if (Math.abs(x) > MAP || Math.abs(z) > MAP) return { ok:false, why:'Beyond the town lands' };
   const lockRank = toolLocked(type);
   if (lockRank) return { ok:false, why:`${def.nm}s unlock at ${lockRank.pop} folk` };
+  if (type === 'keep' && state.buildings.some(b => b.type === 'keep')) return { ok:false, why:'The town already has its Keep' };
   if (def.needsWard && wardDepth(x, z) === 0) return { ok:false, why:`A ${def.nm.toLowerCase()} must stand inside walls — raise the ward first` };
   if (overlapsBuilding(x, z, def.w, def.d)) return { ok:false, why:'Blocked by a building' };
   if (nearWall(x, z, Math.max(def.w, def.d)/2 + 1.2)) return { ok:false, why:'Too close to a wall' };
@@ -1539,11 +1589,20 @@ function wallClickAt(wx, wz) {
     }
     // free-standing draft ending on a wall isn't a ring — ignore the snap, treat as a corner
   }
-  const x = snap(wx), z = snap(wz);
+  let x = snap(wx), z = snap(wz);
   if (Math.abs(x) > MAP || Math.abs(z) > MAP) return;
   if (!startAttach && wallDraft.length >= 3 && Math.hypot(x-wallDraft[0].x, z-wallDraft[0].z) < 3.5) { tryCloseWall(); return; }
+  if (wallDraft.length) {
+    // auto-straighten: near-axis segments snap square, so rings come out clean
+    const p = wallDraft[wallDraft.length-1];
+    const dx = x - p.x, dz = z - p.z;
+    if (Math.abs(dx) < Math.abs(dz) * 0.25) x = p.x;
+    else if (Math.abs(dz) < Math.abs(dx) * 0.25) z = p.z;
+  }
   if (wallDraft.length && Math.hypot(x-wallDraft[wallDraft.length-1].x, z-wallDraft[wallDraft.length-1].z) < 2) return;
   wallDraft.push({ x, z });
+  dustBurst(x, z, 0.6, 4);
+  AudioSys.play('click');
   redrawWallPreview();
 }
 
@@ -1557,15 +1616,18 @@ function redrawWallPreview() {
     cursorSnapped = !!sp;
     if (pts.length || sp) pts.push(sp ? { x:sp.x, z:sp.z } : { x:mouseGround.x, z:mouseGround.z });
   }
+  const broke = wallDraft.length >= 2 && wallDraftCost() > state.stone;
+  const baseCol = broke ? 0xc35b4a : 0xd9a44a;
   for (let i=0;i<pts.length;i++){
     const isCursor = (i === pts.length-1);
     const joined = (i === 0 && startAttach) || (isCursor && cursorSnapped);
-    const post = cyl(0.5, 0.6, 3.4, new THREE.MeshLambertMaterial({ color: joined ? 0x7ac36a : 0xd9a44a, transparent:true, opacity:0.85 }), pts[i].x, 1.7, pts[i].z, 6);
+    const post = cyl(0.5, 0.6, 3.4, new THREE.MeshLambertMaterial({ color: joined ? 0x7ac36a : baseCol, transparent:true, opacity:0.85 }), pts[i].x, 1.7, pts[i].z, 6);
+    if (isCursor && tool === 'wall') post.scale.setScalar(1 + Math.sin(performance.now()*0.006)*0.09);
     wallPreview.add(post);
     if (i>0) {
       const a = pts[i-1], b = pts[i];
       const len = Math.hypot(b.x-a.x, b.z-a.z);
-      const seg = box(0.5, 2.2, len, new THREE.MeshLambertMaterial({ color:0xd9a44a, transparent:true, opacity:0.45 }),
+      const seg = box(0.5, 2.2, len, new THREE.MeshLambertMaterial({ color: baseCol, transparent:true, opacity:0.45 }),
         (a.x+b.x)/2, 1.1, (a.z+b.z)/2);
       seg.rotation.y = Math.atan2(b.x-a.x, b.z-a.z);
       seg.castShadow = false;
@@ -1588,9 +1650,9 @@ function tryCloseWall() {
   state.walls.push({ poly: verts, path: verts, closed: true, group, gates, blockers, gatePts });
   state.villagers.forEach(v => { v.path = null; });
   AudioSys.play('stone');
-  if (state.walls.length === 1 && state.raidNum === 0) {
+  if (state.walls.length === 1 && state.raidNum === 0 && DIFF[state.difficulty].raid > 0) {
     state.raidTimer = 90;
-    msg('Word of a walled town spreads. Raiders will come for its wealth.', 'warn');
+    msg('Word of a walled town spreads. Raiders will come — and they strike whatever stands OUTSIDE the walls.', 'warn');
   }
   refreshDepths();
   const inside = state.buildings.filter(b => b.depth > 0 && !b.ruined).length;
@@ -1612,6 +1674,7 @@ function refreshPaletteLocks() {
     const costEl = el.querySelector('.cost');
     if (lockRank) costEl.innerHTML = `🔒 ${lockRank.pop} folk`;
     else if (t === 'wall') costEl.innerHTML = `🪨${WALL_COST_PER_UNIT}/step`;
+    else if (t === 'road') costEl.innerHTML = `🪨${ROAD_COST}/step`;
     else if (t === 'gate') costEl.innerHTML = `🪨${GATE_COST}`;
     else if (t === 'demolish') costEl.innerHTML = 'refund ½';
     else costEl.innerHTML = costStr(BUILD_DEFS[t].cost);
@@ -1622,6 +1685,7 @@ function setTool(t) {
   const lockRank = t && toolLocked(t);
   if (lockRank) { msg(`${BUILD_DEFS[t] ? BUILD_DEFS[t].nm + 's' : 'That'} unlock at ${lockRank.pop} folk (${lockRank.nm}).`, 'warn'); return; }
   if (t) selectBuilding(null);
+  ghostRot = 0;
   if (tool === 'wall' && t !== 'wall') { wallDraft = []; startAttach = null; redrawWallPreview(); }
   tool = (tool === t) ? null : t;
   if (ghost) { scene.remove(ghost); ghost = null; }
@@ -1706,6 +1770,7 @@ function buildTeleReport() {
 
 // ---------------------------------------------------------------- founding charter
 const OBJECTIVES = [
+  { id:'keep',   label:'Raise your Keep — choose good ground', test:() => state.buildings.some(b => b.type === 'keep') },
   { id:'wall',   label:'Ring the Keep in stone (Wall — 1)',  test:() => state.buildings.some(b => b.type==='keep' && b.depth > 0) },
   { id:'gate',   label:'Cut a gate through it (Gate — 2)',   test:() => state.walls.some(w => w.gates.length > 0) },
   { id:'houses', label:'Raise two houses in the ward',       test:() => state.buildings.filter(b => !b.ruined && b.type==='house' && b.depth>0).length >= 2 },
@@ -1737,6 +1802,8 @@ function updateObjectives(silent=false) {
 const TOOL_HINTS = {
   wall: 'Click corners on the ground; click your first post (or press Enter) to close the ring. Start on an existing wall to join it.',
   gate: 'Click anywhere on a wall to cut a gate through it.',
+  road: 'Click or drag across the ground to lay cobbles. Folk and caravans travel faster on roads.',
+  keep: 'Your Keep is the heart of the town — near trees and stone is wise. If it falls, the town falls.',
 };
 const seenHints = {};
 
@@ -1746,7 +1813,7 @@ function costStr(cost) {
 }
 {
   const TOOL_GROUPS = [
-    { nm:'WALLS',    tools:['wall','gate'] },
+    { nm:'WALLS',    tools:['wall','gate','road'] },
     { nm:'TOWN',     tools:['house','well','granary','market'] },
     { nm:'INDUSTRY', tools:['farm','woodcutter','quarry'] },
     { nm:'DEFENSE',  tools:['tower','barracks'] },
@@ -1763,8 +1830,9 @@ function costStr(cost) {
       const el = document.createElement('div');
       el.className = 'tool'; el.dataset.t = t;
       const ki = TOOL_ORDER.indexOf(t);
-      const key = t === 'demolish' ? 'X' : (ki === 9 ? 0 : ki+1);
+      const key = t === 'demolish' ? 'X' : t === 'tower' ? 'T' : t === 'barracks' ? 'B' : (ki === 9 ? 0 : ki+1);
       if (t === 'wall') el.innerHTML = `<div class="ico">🧱</div><div class="nm">Wall</div><div class="cost">🪨${WALL_COST_PER_UNIT}/step</div>`;
+      else if (t === 'road') el.innerHTML = `<div class="ico">🛤️</div><div class="nm">Road</div><div class="cost">🪨${ROAD_COST}/step</div>`;
       else if (t === 'gate') el.innerHTML = `<div class="ico">🚪</div><div class="nm">Gate</div><div class="cost">🪨${GATE_COST}</div>`;
       else if (t === 'demolish') el.innerHTML = `<div class="ico">🔨</div><div class="nm">Demolish</div><div class="cost">refund ½</div>`;
       else {
@@ -1844,11 +1912,18 @@ function updateHUD() {
   $('r-pop').textContent = `${fmt(state.pop)}/${popCap()}`;
   $('daycount').textContent = `${state.townName ? state.townName + ' — ' : ''}${RANKS[state.rankIdx].nm} · Day ${state.day} · ${seasonOf(state.day).nm}`;
   const warn = $('raidwarn');
-  if (!state.over && state.raidTimer < 15) {
+  const raidsOn = DIFF[state.difficulty].raid > 0 && state.walls.length > 0;
+  if (state.bandits.length) {
     warn.style.display = 'inline';
-    warn.textContent = `⚠ RAIDERS FROM THE ${state.raidEdge.name} — ${Math.ceil(state.raidTimer)}s`;
-  } else warn.style.display = state.bandits.length ? 'inline' : 'none';
-  if (state.bandits.length) warn.textContent = '⚠ RAID IN PROGRESS';
+    warn.textContent = '⚠ RAID IN PROGRESS';
+    warn.style.animation = '';
+  } else if (!state.over && raidsOn && state.raidTimer <= 45) {
+    warn.style.display = 'inline';
+    warn.textContent = state.raidTimer < 15
+      ? `⚠ RAIDERS FROM THE ${state.raidEdge.name} — ${Math.ceil(state.raidTimer)}s`
+      : `⚔ Raid in ${Math.ceil(state.raidTimer)}s`;
+    warn.style.animation = state.raidTimer < 15 ? '' : 'none';
+  } else warn.style.display = 'none';
   $('vignette').style.opacity = state.bandits.length ? 1 : 0;
   // food delta
   const dfood = foodRate();
@@ -1980,7 +2055,7 @@ function fireTick(dt) {
   if (objAllDoneAt && state.fireCool <= 0) {
     for (const b of state.buildings) {
       if (b.ruined || b.onFire || b.depth < 1 || !FLAMMABLE[b.type]) continue;
-      const perSec = 0.0006 * FLAMMABLE[b.type] * (b._well ? 0.3 : 1) * (state.raining ? 0.2 : 1);
+      const perSec = 0.0006 * DIFF[state.difficulty].fire * FLAMMABLE[b.type] * (b._well ? 0.3 : 1) * (state.raining ? 0.2 : 1);
       if (Math.random() < perSec * dt) {
         igniteBuilding(b);
         state.fireCool = 140 + Math.random()*80;
@@ -2134,7 +2209,9 @@ function raidableTargets() {
 
 function spawnRaid() {
   state.raidNum++;
-  const size = Math.min(2 + Math.floor(state.day/3) + Math.floor(state.raidNum/4), 10);
+  state.raidStats = { kills: 0, lost: 0 };
+  const size = Math.max(1, Math.min(14,
+    Math.round((2 + Math.floor(state.day/3) + Math.floor(state.raidNum/4)) * DIFF[state.difficulty].raid)));
   const e = state.raidEdge;
   for (let i=0;i<size;i++){
     const ox = e.x !== 0 ? e.x * (MAP+18) : (Math.random()-0.5)*140;
@@ -2221,8 +2298,9 @@ function moveToward(a, tx, tz, dt) {
   const d = Math.hypot(tx-a.x, tz-a.z);
   if (d < 0.01) return;
   a._moved = true;
-  let nx = a.x + (tx-a.x)/d * a.speed * dt;
-  let nz = a.z + (tz-a.z)/d * a.speed * dt;
+  const spd = a.speed * (onRoad(a.x, a.z) ? 1.35 : 1);
+  let nx = a.x + (tx-a.x)/d * spd * dt;
+  let nz = a.z + (tz-a.z)/d * spd * dt;
   // walls and raised gates are solid: slide along them instead of ghosting through
   if (!passable(a.x, a.z, nx, nz)) {
     if (passable(a.x, a.z, nx, a.z)) nz = a.z;
@@ -2249,9 +2327,14 @@ function removeBandit(bd) {
   AudioSys.play('fall');
   scene.remove(bd.grp);
   disposeGroup(bd.grp);
+  if (bd.hp <= 0 && state.raidStats) state.raidStats.kills++;
   const i = state.bandits.indexOf(bd);
   if (i >= 0) state.bandits.splice(i, 1);
-  if (!state.bandits.length && !state.over) { msg('The raid is over.', 'good'); teleEv('raid_end'); }
+  if (!state.bandits.length && !state.over) {
+    const rs = state.raidStats || { kills:0, lost:0 };
+    msg(`Raid over — ${rs.kills} raider${rs.kills===1?'':'s'} slain${rs.lost ? `, ${rs.lost} building${rs.lost===1?'':'s'} burned` : ', nothing lost'}.`, rs.lost ? 'warn' : 'good');
+    teleEv('raid_end');
+  }
 }
 
 function destroyBuilding(b, byBandit=null) {
@@ -2268,6 +2351,7 @@ function destroyBuilding(b, byBandit=null) {
   b.group.traverse(o => { o.userData.b = b; });
   scene.add(b.group);
   if (byBandit) {
+    if (state.raidStats) state.raidStats.lost++;
     const loot = Math.min(25, Math.floor(state.gold));
     state.gold -= loot;
     byBandit.state = 'flee'; byBandit.target = null;
@@ -2463,6 +2547,8 @@ addEventListener('keydown', e => {
   if (idx >= 0 && idx < TOOL_ORDER.length) setTool(TOOL_ORDER[idx]);
   if (e.code === 'KeyX') setTool('demolish');
   if (e.code === 'KeyB') setTool('barracks');
+  if (e.code === 'KeyT') setTool('tower');
+  if (e.code === 'KeyR' && tool && BUILD_DEFS[tool]) ghostRot = (ghostRot + Math.PI/2) % (Math.PI*2);
   if (e.code === 'Space' && state.started && !state.over && $('settings').style.display === 'none') {
     e.preventDefault();
     setSpeed(0);
@@ -2482,6 +2568,14 @@ renderer.domElement.addEventListener('pointerdown', e => {
 addEventListener('pointerup', e => {
   touchPts.delete(e.pointerId);
   pinchPrev = null;
+  // right-click (no drag) undoes the last wall corner
+  if (dragBtn === 2 && dragDist < 6 && tool === 'wall' && wallDraft.length) {
+    wallDraft.pop();
+    if (!wallDraft.length) startAttach = null;
+    redrawWallPreview();
+    dragBtn = -1;
+    return;
+  }
   if (dragBtn === 0 && dragDist < 6) {
     // refresh cursor state from the event itself (synthetic clicks may skip pointermove)
     mousePx.x = e.clientX; mousePx.y = e.clientY;
@@ -2513,6 +2607,12 @@ addEventListener('pointermove', e => {
     pinchPrev = { dist, cx, cy };
     return;
   }
+  if (dragBtn === 0 && tool === 'road' && state.started && !state.over) {
+    // drag-paint roads
+    ray.setFromCamera(mouse, camera);
+    ray.ray.intersectPlane(groundPlane, mouseGround);
+    paintRoadAt(mouseGround.x, mouseGround.z);
+  }
   if (dragBtn >= 0) {
     const dx = e.clientX-lastMx, dy = e.clientY-lastMy;
     dragDist += Math.abs(dx) + Math.abs(dy);
@@ -2541,6 +2641,11 @@ function handleClick() {
     wallClickAt(mouseGround.x, mouseGround.z);
     return;
   }
+  if (tool === 'road') {
+    paintRoadAt(mouseGround.x, mouseGround.z);
+    saveGame();
+    return;
+  }
   if (tool === 'gate') {
     gateClickAt(mouseGround.x, mouseGround.z);
     return;
@@ -2564,10 +2669,10 @@ function handleClick() {
     const x = snap(mouseGround.x), z = snap(mouseGround.z);
     const chk = placementCheck(tool, x, z);
     if (!chk.ok) { msg(chk.why, 'warn'); return; }
-    const b = placeBuilding(tool, x, z);
+    const b = placeBuilding(tool, x, z, false, ghostRot);
     if (b) {
-      const inside = b.depth > 0;
-      if (!inside && b.type !== 'farm' && b.type !== 'woodcutter' && b.type !== 'quarry')
+      if (b.type === 'keep') msg('The Keep rises. Now: walls first (Wall — 1).', 'good');
+      else if (b.depth === 0 && b.type !== 'farm' && b.type !== 'woodcutter' && b.type !== 'quarry')
         msg(`${BUILD_DEFS[b.type].nm} built OUTSIDE the walls — raiders can reach it.`, 'warn');
       saveGame();
       if (!keys.ShiftLeft && !keys.ShiftRight) setTool(null);
@@ -2607,8 +2712,9 @@ function saveGame(key = 'bulwark-save') {
       v: 3,
       gold:state.gold, wood:state.wood, stone:state.stone, food:state.food,
       townName:state.townName, seed:state.seed, regionNm:state.regionNm,
+      difficulty:state.difficulty, roads:state.roads,
       pop:state.pop, maxPop:state.maxPop, rankIdx:state.rankIdx, time:state.time, raidNum:state.raidNum,
-      buildings: state.buildings.map(b => ({ type:b.type, x:b.x, z:b.z, hp:b.hp, ruined:b.ruined })),
+      buildings: state.buildings.map(b => ({ type:b.type, x:b.x, z:b.z, rot:b.rot||0, hp:b.hp, ruined:b.ruined })),
       walls: state.walls.map(w => ({ poly:w.poly, path:w.path, closed:w.closed,
         gates: w.gates.map(g => ({ seg:g.seg, t:g.t })) })),   // strip runtime door refs
     }));
@@ -2622,7 +2728,11 @@ function loadGame() {
   state.day = Math.floor(s.time / DAY) + 1;
   state.seed = s.seed || REGIONS[0].seed;
   state.regionNm = s.regionNm || REGIONS[0].nm;
+  state.difficulty = DIFF[s.difficulty] ? s.difficulty : 'standard';
   scatterWorld(state.seed);
+  state.roads = s.roads || [];
+  roadSet.clear();
+  for (const [gx, gz] of state.roads) { roadSet.add(`${gx},${gz}`); stampRoadCell(gx, gz); }
   // rank: stored high-water mark, grandfathering legacy saves by what they built
   let mp = s.maxPop ?? s.pop;
   for (const b of s.buildings) {
@@ -2645,7 +2755,7 @@ function loadGame() {
     state.walls.push({ poly, path, closed, group, gates, blockers, gatePts });
   }
   for (const b of s.buildings) {
-    const nb = placeBuilding(b.type, b.x, b.z, true);
+    const nb = placeBuilding(b.type, b.x, b.z, true, b.rot || 0);
     nb.hp = b.hp;
     if (b.ruined) destroyBuilding(nb);
   }
@@ -2653,15 +2763,22 @@ function loadGame() {
   return true;
 }
 
-function newTownSetup() {
+function newTownSetup(diff = 'standard') {
+  state.difficulty = DIFF[diff] ? diff : 'standard';
+  const rm = DIFF[state.difficulty].res;
+  state.gold = Math.round(100 * rm);
+  state.wood = Math.round(120 * rm);
+  state.stone = Math.round(155 * rm);
+  state.food = Math.round(60 * rm);
   state.townName = TOWN_PRE[Math.random()*TOWN_PRE.length|0] + TOWN_SUF[Math.random()*TOWN_SUF.length|0];
   const region = REGIONS[Math.random()*REGIONS.length|0];
   state.seed = region.seed;
   state.regionNm = region.nm;
   scatterWorld(region.seed);
-  placeBuilding('keep', 0, 0, true);
-  msg(`The town of ${state.townName} is founded in ${state.regionNm || 'the valley'}. The Keep stands alone.`, 'good');
-  msg('Walls first: ring the Keep in stone (Wall tool, key 1).', 'dim');
+  state.roads = [];
+  roadSet.clear();
+  msg(`${state.townName}, in ${state.regionNm}. First: choose ground and raise your Keep.`, 'good');
+  setTool('keep');
   updateObjectives(true);
 }
 
@@ -2682,8 +2799,8 @@ function step(dt) {
     saveGame();
   }
   economyTick(dt);
-  // raiders only muster once there are walls worth plundering
-  if (state.walls.length) {
+  // raiders only muster once there are walls worth plundering — never on Peaceful
+  if (state.walls.length && DIFF[state.difficulty].raid > 0) {
     state.raidTimer -= dt;
     if (state.raidTimer <= 0) spawnRaid();
   }
@@ -2768,11 +2885,13 @@ function frame(dt) {
         const n = state.buildings.filter(b => !b.ruined && pointInPoly(b.x, b.z, wallDraft)).length;
         enclose = `\nencloses ~${Math.round(area)} u² · <span class="safe">${n} building${n===1?'':'s'} inside</span>`;
       }
-      hintEl.innerHTML = `${startAttach ? 'Wall' : 'Ring'} cost: <span class="${afford?'safe':'unsafe'}">🪨${cost}</span>` +
+      const lastP = wallDraft[wallDraft.length-1];
+      const segLen = Math.round(Math.hypot(mouseGround.x-lastP.x, mouseGround.z-lastP.z));
+      hintEl.innerHTML = `${startAttach ? 'Wall' : 'Ring'} cost: <span class="${afford?'safe':'unsafe'}">🪨${cost}</span> · seg ${segLen}u` +
         `\n${wallDraft.length} corner${wallDraft.length===1?'':'s'} — ` +
         (startAttach ? 'end on the same wall to enclose a ward'
           : (wallDraft.length >= 3 ? 'click the first post or press Enter to close' : 'click to add corners')) +
-        enclose + '\nBackspace undoes a corner';
+        enclose + '\nright-click or Backspace undoes a corner';
     } else hintEl.style.display = 'none';
   } else if (tool === 'gate') {
     const sp = wallSnap(mouseGround.x, mouseGround.z);
@@ -2785,6 +2904,7 @@ function frame(dt) {
   } else if (ghost && tool) {
     const x = snap(mouseGround.x), z = snap(mouseGround.z);
     ghost.position.set(x, 0, z);
+    ghost.rotation.y = ghostRot;
     const chk = placementCheck(tool, x, z);
     const depth = wardDepth(x, z);
     ghost.traverse(o => {
@@ -2798,7 +2918,7 @@ function frame(dt) {
     const safety = depth > 0
       ? `<span class="safe">🛡 Ward ${['','I','II','III','IV','V'][Math.min(depth,5)]} — protected${depth>1?`, tax ×${(1+0.25*(depth-1)).toFixed(2)}`:''}</span>`
       : `<span class="unsafe">⚠ Outside the walls — raidable</span>`;
-    hintEl.innerHTML = (chk.ok ? safety : `<span class="unsafe">✖ ${chk.why}</span>`);
+    hintEl.innerHTML = (chk.ok ? safety : `<span class="unsafe">✖ ${chk.why}</span>`) + '\nR rotates';
   } else if (state.started && !state.over) {
     // no tool: hover a building for its ledger entry (throttled raycast)
     hoverT -= dt;
@@ -3125,7 +3245,7 @@ $('titleSettings').onclick = openSettings;
 applySettings(false);
 
 // ---------------------------------------------------------------- boot
-function startGame(cont) {
+function startGame(cont, diff = 'standard') {
   $('intro').style.display = 'none';
   state.started = true;
   AudioSys.init();
@@ -3135,7 +3255,7 @@ function startGame(cont) {
     updateObjectives(true);   // seed the charter from restored progress, silently
     teleStart(true);
   } else {
-    newTownSetup();
+    newTownSetup(diff);
     teleStart(false);
   }
 }
@@ -3151,9 +3271,15 @@ function startGame(cont) {
     $('contbtn').onclick = () => startGame(true);
     $('startbtn').onclick = () => {
       if (localStorage.getItem('bulwark-save') && !confirm('Start a new town? The current autosave will be overwritten.')) return;
-      localStorage.removeItem('bulwark-save');
-      startGame(false);
+      $('startbtn').style.display = 'none';
+      $('diffrow').style.display = 'flex';
     };
+    document.querySelectorAll('.diffbtn').forEach(b => {
+      b.onclick = () => {
+        localStorage.removeItem('bulwark-save');
+        startGame(false, b.dataset.diff);
+      };
+    });
   }
 }
 
@@ -3165,6 +3291,7 @@ window.BULWARK = {
   clickWall: (x,z) => { const prev = tool; tool = 'wall'; wallClickAt(x, z); tool = prev; },
   cutGate: (x,z) => gateClickAt(x, z),
   removeWallAt: (x,z) => { const sp = wallSnap(x, z); if (sp) removeWall(sp.wall); return !!sp; },
+  paintRoad: (x,z) => paintRoadAt(x, z),
   teleReport: () => buildTeleReport(),
   save: (k) => saveGame(k),
   seasonOf,

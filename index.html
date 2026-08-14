@@ -80,8 +80,7 @@
   .tool .nm { font-size:11px; color:#cbb98f; margin-top:2px; }
   .tool .cost { font-size:10px; color:#8a7a58; margin-top:1px; }
   .tool.disabled { opacity:.38; cursor:default; }
-  .tool.locked { opacity:.32; }
-  .tool.locked .cost { color:#a08a5a; }
+  .tool.locked { display:none; }   /* locked tools stay out of sight until their rank */
   .tool .key { position:absolute; }
 
   /* ---------- message log ---------- */
@@ -137,6 +136,8 @@
 
   .titlebtns { display:flex; flex-direction:column; gap:10px; align-items:center; margin:18px 0 8px; }
   .titlebtns button { width:260px; }
+  #diffrow { display:flex; }
+  #diffrow .diffbtn { width:auto; padding:9px 14px; font-size:13px; letter-spacing:1px; }
   .panel button.secondary { background:none; border:1px solid #6b5427; color:#d9a44a; }
   .panel button.secondary:hover { background:#3a2b12; }
   .setrow { display:flex; align-items:center; gap:14px; margin:10px 0; }
@@ -262,6 +263,11 @@
     <div class="titlebtns">
       <button id="contbtn" style="display:none">CONTINUE</button>
       <button id="startbtn" class="secondary">NEW TOWN</button>
+      <div id="diffrow" style="display:none; gap:8px">
+        <button class="secondary diffbtn" data-diff="peaceful" title="No raids, no fires — pure building">☮ PEACEFUL</button>
+        <button class="secondary diffbtn" data-diff="standard" title="The intended experience">⚔ STANDARD</button>
+        <button class="secondary diffbtn" data-diff="harsh" title="Bigger raids, hungrier fires, leaner start">🔥 HARSH</button>
+      </div>
       <button id="titleSettings" class="secondary">SETTINGS</button>
     </div>
     <div class="keys" style="text-align:center">

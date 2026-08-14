@@ -182,7 +182,8 @@ function runTests() {
   let meshOK = true;
   const smokeTypes = ['hovel','manor','greatstore','tavern','chapel','mill','sawmill','tradepost','watchpost','stakes','ballista','garden','fountain','bannerpole','statue',
     'infirmary','bathhouse','school','orchard','beacon','townhall',
-    'longhouse','rowhouse','townhouse','woodpile','cart','signpost','lamppost'];
+    'longhouse','rowhouse','townhouse','woodpile','cart','signpost','lamppost',
+    'fence','planttree','maypole','shrine','beehives','stall','graveyard'];
   try {
     smokeTypes.forEach((t, i) => B.placeFree(t, -60 + (i % 14)*8, -60 + Math.floor(i / 14)*10));
   } catch (e) { meshOK = false; }
@@ -243,6 +244,15 @@ function runTests() {
   const wood0 = S.wood;
   B.upgrade(upPost);   // tower has no path — nothing should happen or charge
   ok('a tower has no further upgrade', upPost.type === 'tower' && S.wood === wood0);
+
+  // ---- paint
+  S.gold += 50;
+  const paintMe = B.placeFree('house', -80, 30);
+  const gold0 = S.gold;
+  B.paint(paintMe);
+  ok('a coat of paint tints the roof and charges gold', paintMe.tint === 0xb8452f && S.gold === gold0 - 3);
+  for (let i = 0; i < 6; i++) B.paint(paintMe);
+  ok('painting past the last dye strips it bare', paintMe.tint == null);
 
   // ---- occasions & photo mode
   ok('the harvest festival falls on autumn’s first day',

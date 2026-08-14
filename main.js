@@ -51,6 +51,13 @@ const BUILD_DEFS = {
   cart:       { nm:'Cart',       w:2,  d:2,  hp:30,  cost:{wood:12} },
   signpost:   { nm:'Signpost',   w:2,  d:2,  hp:20,  cost:{wood:5} },
   lamppost:   { nm:'Lamp Post',  w:2,  d:2,  hp:30,  cost:{wood:8, gold:5} },
+  fence:      { nm:'Fence',      w:2,  d:1,  hp:15,  cost:{wood:3} },
+  planttree:  { nm:'Tree',       w:2,  d:2,  hp:25,  cost:{gold:3} },
+  maypole:    { nm:'Maypole',    w:2,  d:2,  hp:30,  cost:{wood:12, gold:5}, needsWard:true },
+  shrine:     { nm:'Shrine',     w:2,  d:2,  hp:50,  cost:{stone:15, gold:10} },
+  beehives:   { nm:'Beehives',   w:2,  d:2,  hp:20,  cost:{wood:10} },
+  stall:      { nm:'Stall',      w:2,  d:2,  hp:30,  cost:{wood:15}, needsWard:true },
+  graveyard:  { nm:'Graveyard',  w:3,  d:3,  hp:40,  cost:{stone:12} },
   keep:       { nm:'Keep',       w:6,  d:6,  hp:400, cost:{},                   popCap:8 },
 };
 // the palette is tabbed by trade; digits pick within the open tab
@@ -61,7 +68,8 @@ const TABS = [
   { id:'civicTab', nm:'CIVIC',  tools:['tavern','chapel','infirmary','bathhouse','school','townhall'] },
   { id:'workTab',  nm:'WORKS',  tools:['farm','orchard','mill','woodcutter','sawmill','quarry','tradepost'] },
   { id:'guardTab', nm:'GUARD',  tools:['stakes','watchpost','beacon','hoardings','moat','tower','ballista','barracks'] },
-  { id:'decorTab', nm:'DECOR',  tools:['garden','fountain','bannerpole','statue','woodpile','cart','signpost','lamppost'] },
+  { id:'decorTab', nm:'DECOR',  tools:['paint','fence','planttree','garden','maypole','shrine','stall','graveyard'] },
+  { id:'propsTab', nm:'PROPS',  tools:['fountain','statue','bannerpole','woodpile','cart','signpost','lamppost','beehives'] },
 ];
 const WALL_TIERS = {
   palisade: { nm:'Palisade',  res:'wood',  cost:0.8, h:3.8, flammable:true },
@@ -92,13 +100,13 @@ const isGateTool = t => !!GATE_TIERS[t];
 const isRoadTool = t => !!ROAD_TIERS[t];
 const TOOL_NAME = t => (BUILD_DEFS[t] && BUILD_DEFS[t].nm) || (WALL_TIERS[t] && WALL_TIERS[t].nm)
   || (GATE_TIERS[t] && GATE_TIERS[t].nm) || (ROAD_TIERS[t] && ROAD_TIERS[t].nm)
-  || (t === 'hoardings' ? 'Hoardings' : t);
+  || (t === 'hoardings' ? 'Hoardings' : t === 'paint' ? 'Paint' : t);
 const GATE_COST = 10; // stone, for the Gate tool
 
 // ---------------------------------------------------------------- state
 const RANKS = [
-  { pop: 0,  nm: 'Hamlet',  unlocks: ['palisade','wall','woodgate','dirtroad','road','hovel','house','farm','woodcutter','demolish','woodpile','signpost'] },
-  { pop: 12, nm: 'Village', unlocks: ['gate','well','granary','quarry','mill','sawmill','tavern','watchpost','stakes','orchard','beacon','longhouse','cart','lamppost'] },
+  { pop: 0,  nm: 'Hamlet',  unlocks: ['palisade','wall','woodgate','dirtroad','road','hovel','house','farm','woodcutter','demolish','woodpile','signpost','paint','fence','planttree'] },
+  { pop: 12, nm: 'Village', unlocks: ['gate','well','granary','quarry','mill','sawmill','tavern','watchpost','stakes','orchard','beacon','longhouse','cart','lamppost','maypole','shrine','stall','beehives','graveyard'] },
   { pop: 20, nm: 'Town',    unlocks: ['highwall','flagroad','market','chapel','tower','tradepost','fountain','garden','hoardings','moat','infirmary','bathhouse','school','rowhouse','townhouse'] },
   { pop: 32, nm: 'City',    unlocks: ['greatgate','greatstore','barracks','statue','bannerpole','ballista','townhall'] },
 ];
@@ -335,6 +343,9 @@ scene.add(patchMesh);
 const _regionTint = new THREE.Color(0xffffff);
 const MOSS_M = new THREE.MeshLambertMaterial({ color:0x55643a });
 const TURF_M = new THREE.MeshLambertMaterial({ color:0x687c3e });
+// planted trees share one crown material so the seasons can tint them
+const PLANT_LEAF_M = new THREE.MeshLambertMaterial({ color:0x4f7a38 });
+const _plantBase = new THREE.Color(0x4f7a38);
 
 // worn paths: agents stamp wear into an overlay canvas as they walk, so the
 // town grows visible dirt roads from its gates
@@ -1454,6 +1465,87 @@ function buildMesh(type, bx = 0, bz = 0) {
     }
     g.add(box(1.1, 1.6, 0.1, MAT.timber, 0, 0.8, 1.42));
     g.add(mkVane(0, 4.4, -1.2));
+  } else if (type === 'fence') {
+    for (const px of [-0.9, 0, 0.9]) g.add(cyl(0.06, 0.07, 0.85, MAT.timber, px, 0.42, 0, 4));
+    g.add(box(1.95, 0.07, 0.07, MAT.timber, 0, 0.66, 0));
+    g.add(box(1.95, 0.07, 0.07, MAT.timber, 0, 0.38, 0));
+  } else if (type === 'planttree') {
+    const sc = 0.8 + vh*0.5;
+    g.add(cyl(0.13*sc, 0.19*sc, 1.2*sc, MAT.timber, 0, 0.6*sc, 0, 5));
+    if ((vh*7) % 1 < 0.6) {
+      const cr = new THREE.Mesh(new THREE.IcosahedronGeometry(1.05*sc, 0), PLANT_LEAF_M);
+      cr.position.y = 1.95*sc; cr.castShadow = true; g.add(cr);
+    } else {
+      const cr = new THREE.Mesh(new THREE.ConeGeometry(0.85*sc, 2.0*sc, 7), PLANT_LEAF_M);
+      cr.position.y = 2.0*sc; cr.castShadow = true; g.add(cr);
+    }
+    g.rotation.y = vh * Math.PI * 2;
+  } else if (type === 'maypole') {
+    g.add(cyl(0.07, 0.1, 4.2, MAT.timber, 0, 2.1, 0, 6));
+    g.add(cone(0.16, 0.28, MAT.rankBanner, 0, 4.35, 0, 6));
+    const cols = [0xc23b2a, 0xe8dcc2, 0x3e5c7a, 0xd9a44a, 0x5a7a4a];
+    for (let k = 0; k < 5; k++) {
+      const arm = new THREE.Group();
+      arm.rotation.y = k * Math.PI*2/5;
+      const rib = box(0.06, 2.7, 0.02, new THREE.MeshLambertMaterial({ color: cols[k] }), 0, 0, 0.05);
+      rib.geometry.translate(0, -1.35, 0);
+      rib.position.y = 4.2;
+      rib.rotation.x = 0.42;   // ribbons flare out from the crown
+      rib.userData.isCloth = true;
+      rib.userData.sway = k * 1.3;
+      arm.add(rib);
+      g.add(arm);
+    }
+  } else if (type === 'shrine') {
+    g.add(box(1.1, 0.4, 0.9, MAT.stone, 0, 0.2, 0));
+    g.add(box(0.85, 1.2, 0.65, MAT.stoneD, 0, 1.0, 0));
+    g.add(box(0.55, 0.6, 0.1, new THREE.MeshLambertMaterial({ color:0x1c1710 }), 0, 1.05, 0.3));
+    g.add(cone(0.62, 0.55, MAT.roofB, 0, 1.85, 0, 4));
+    g.add(cyl(0.05, 0.05, 0.16, new THREE.MeshLambertMaterial({ color:0xe8dcc2 }), 0, 0.95, 0.28, 5));
+    const glow = new THREE.Sprite(MAT.windowGlow);
+    glow.scale.setScalar(1.1);
+    glow.position.set(0, 1.05, 0.32);
+    g.add(glow);
+    for (const s of [-1, 1]) g.add(new THREE.Mesh(new THREE.SphereGeometry(0.09, 5, 4),
+      new THREE.MeshLambertMaterial({ color:[0xd96a6a, 0xf2d24b][s > 0 ? 0 : 1] })).translateX(s*0.5).translateY(0.45).translateZ(0.35));
+  } else if (type === 'beehives') {
+    g.add(box(1.7, 0.25, 0.8, MAT.timber, 0, 0.3, 0));
+    for (const [px, sc] of [[-0.55, 1], [0.05, 0.9], [0.6, 1.05]]) {
+      const straw = new THREE.MeshLambertMaterial({ color:0xc9a86a });
+      g.add(cyl(0.26*sc, 0.3*sc, 0.34*sc, straw, px, 0.6, 0, 7));
+      g.add(cone(0.28*sc, 0.3*sc, straw, px, 0.92, 0, 7));
+    }
+    g.rotation.y = vh * Math.PI * 2;
+  } else if (type === 'stall') {
+    g.add(box(1.8, 0.25, 1.4, MAT.timber, 0, 0.12, 0));
+    for (const px of [-0.8, 0.8]) g.add(cyl(0.07, 0.08, 1.9, MAT.timber, px, 0.95, -0.5, 5));
+    const awnBase = [0xb8452f, 0x3e5c7a, 0x4e7a3e][(vh*3)|0];
+    const awn = box(2.0, 0.06, 1.5, new THREE.MeshLambertMaterial({ color: awnBase }), 0, 1.85, 0.1);
+    awn.rotation.x = -0.28; g.add(awn);
+    for (let i = 0; i < 2; i++) {
+      const st = box(2.0, 0.062, 0.3, new THREE.MeshLambertMaterial({ color:0xe8dcc2 }), 0, 1.851, -0.45 + i*0.75);
+      st.rotation.x = -0.28; g.add(st);
+    }
+    g.add(box(1.6, 0.5, 0.7, MAT.timber, 0, 0.5, 0.25));
+    g.add(box(0.5, 0.3, 0.4, MAT.crop, -0.4, 0.9, 0.25));
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 5), new THREE.MeshLambertMaterial({ color:0xd96a6a })).translateX(0.4).translateY(0.95).translateZ(0.25));
+    g.rotation.y = ((vh*16)|0) % 4 * Math.PI/2;
+  } else if (type === 'graveyard') {
+    for (const px of [-1.3, 0, 1.3]) {
+      g.add(cyl(0.05, 0.06, 0.6, MAT.timber, px, 0.3, -1.35, 4));
+      g.add(cyl(0.05, 0.06, 0.6, MAT.timber, px, 0.3, 1.35, 4));
+    }
+    for (const s of [-1, 1]) g.add(box(2.8, 0.06, 0.06, MAT.timber, 0, 0.48, s*1.35));
+    const stones = [[-0.8, -0.5, 0.5], [0.3, -0.2, 0.9], [0.9, 0.7, 0.3], [-0.5, 0.8, 0.7]];
+    for (const [px, pz, h] of stones) {
+      const st = box(0.34, h, 0.1, MAT.stoneD, px, h/2, pz);
+      st.rotation.z = (Math.sin(px*9 + pz*7)) * 0.09;
+      g.add(st);
+      const cap = cyl(0.17, 0.17, 0.1, MAT.stoneD, px, h, pz, 8);
+      cap.rotation.x = Math.PI/2;
+      g.add(cap);
+    }
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.08, 5, 4), new THREE.MeshLambertMaterial({ color:0xf2d24b })).translateX(-0.8).translateY(0.1).translateZ(0.75));
   } else if (type === 'stakes') {
     for (const [px, pz, tilt] of [[-0.6,-0.5,0.5],[0.3,-0.6,-0.4],[0.7,0.3,0.5],[-0.3,0.6,-0.5],[0,0,0.2]]) {
       const st = cyl(0.02, 0.12, 1.5, MAT.timber, px, 0.6, pz, 5);
@@ -1825,6 +1917,7 @@ function seasonVisualTick(dt) {
   const k = Math.min(1, dt * 0.35);
   ground.material.color.lerp(_seasonCol.setHex(s.ground).multiply(_regionTint), k);
   for (const m of seasonMats.leaves) m.color.lerp(_seasonCol.setHex(s.leaf), k);
+  PLANT_LEAF_M.color.lerp(_seasonCol.setHex(s.leaf).multiply(_plantBase), k);
   // roofs take their snow blankets on and off with the season
   const wNow = s.nm === 'Winter';
   if (wNow !== winterVisible) {
@@ -3408,6 +3501,7 @@ function updateObjectives(silent=false) {
 }
 
 const TOOL_HINTS = {
+  paint: 'Click any finished building to paint its roof. Keep clicking to cycle the dyes; the last click strips it bare again.',
   wall: 'Click corners on the ground; click your first post (or press Enter) to close the ring. Start on an existing wall to join it.',
   gate: 'Click anywhere on a wall to cut a gate through it.',
   road: 'Click or drag across the ground to lay cobbles. Folk and caravans travel faster on roads.',
@@ -3423,6 +3517,7 @@ function toolCostStr(t) {
   if (GATE_TIERS[t]) return `${resSVG(GATE_TIERS[t].res, 11)}${GATE_TIERS[t].cost}`;
   if (ROAD_TIERS[t]) return `${resSVG(ROAD_TIERS[t].res, 11)}${ROAD_TIERS[t].cost}/u`;
   if (t === 'hoardings') return `${resSVG('wood', 11)}${HOARDING_COST}/wall`;
+  if (t === 'paint') return `${resSVG('gold', 11)}3/coat`;
   if (t === 'demolish') return 'refund ½';
   return costStr(BUILD_DEFS[t].cost);
 }
@@ -3431,6 +3526,7 @@ function canAffordTool(t) {
   if (GATE_TIERS[t]) return state[GATE_TIERS[t].res] >= GATE_TIERS[t].cost;
   if (ROAD_TIERS[t]) return state[ROAD_TIERS[t].res] >= ROAD_TIERS[t].cost;
   if (t === 'hoardings') return state.wood >= HOARDING_COST;
+  if (t === 'paint') return state.gold >= 3;
   if (BUILD_DEFS[t]) return canAfford(BUILD_DEFS[t].cost);
   return true;
 }
@@ -3776,7 +3872,7 @@ function hashStr(s) {
 const CREST_FIELDS = ['#c23b2a', '#2e4a7a', '#3e6a3a', '#7a4a8c', '#2a2a30', '#7a3020', '#3a7a8a', '#9c6a1a'];
 const CREST_METALS = ['#e8dcc2', '#d9c9a8', '#f2e6c8'];
 function makeCrest() {
-  let x = (hashStr(state.townName || 'town') ^ (state.seed || 1)) || 7;
+  let x = (hashStr(state.townName || 'town') ^ (state.seed || 1) ^ Math.imul(state.crestVar || 0, 2654435761)) || 7;
   const rnd = () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; };
   const W = 96, H = 112;
   const c = crestCanvas || (crestCanvas = document.createElement('canvas'));
@@ -3911,6 +4007,7 @@ function growInto(b, into, note) {
   b.group.rotation.y += b.rot || 0;
   wireGroup(b, b.group);
   scene.add(b.group);
+  if (b.tint) applyTint(b, b.tint);   // the paint survives the renovation
   b.buildT = 0;
   b.upT = 0;
   b.day = state.day;   // renovation resets the moss clock
@@ -3922,6 +4019,43 @@ function growInto(b, into, note) {
   redrawTownGround();
   saveGame();
 }
+// the paint tool: each coat cycles the roof through the dyer's palette
+const DYES = [null, 0xb8452f, 0x3e5c7a, 0x4e7a3e, 0xc9a83a, 0x7a4a6a, 0x6a7078];
+function applyTint(b, tint) {
+  b.group.traverse(o => {
+    if (!o.isMesh || o.userData.isSnow) return;
+    const painted = o.userData._dyed;
+    const isRoof = o.material === MAT.roof || o.material === MAT.roofD || o.material === MAT.roofB;
+    if (!isRoof && !painted) return;
+    if (tint == null) {
+      if (painted && o.userData._orig) {
+        o.material.dispose();
+        o.material = o.userData._orig;
+        o.userData._dyed = false;
+      }
+    } else if (painted) {
+      o.material.color.setHex(tint);
+    } else {
+      o.userData._orig = o.material;
+      o.material = o.material.clone();
+      o.material.color.setHex(tint);
+      o.userData._dyed = true;
+    }
+  });
+}
+function paintBuilding(b) {
+  if (b.ruined || b.buildT < 1) return;
+  const cur = b.tint == null ? null : b.tint;
+  const next = DYES[(DYES.indexOf(cur) + 1) % DYES.length];
+  if (next != null && state.gold < 3) { msg('A coat of paint costs 3 gold.', 'warn'); return; }
+  if (next != null) state.gold -= 3;
+  applyTint(b, next);
+  b.tint = next;
+  AudioSys.play('click');
+  msg(next == null ? 'Back to honest thatch and shingle.' : 'A fresh coat of paint.', 'dim');
+  saveGame();
+}
+
 function tryUpgrade(b) {
   const up = UPGRADES[b.type];
   if (!up || b.ruined || b.onFire || b.buildT < 1) return;
@@ -4602,6 +4736,8 @@ function villagerTick(dt) {
 // ---------------------------------------------------------------- input
 const keys = {};
 addEventListener('keydown', e => {
+  // typing in a text field must never trip game hotkeys
+  if (document.activeElement && document.activeElement.tagName === 'INPUT' && document.activeElement.type === 'text') return;
   keys[e.code] = true;
   if (e.code === 'Escape') {
     if (photoMode) { setPhotoMode(false); return; }
@@ -4746,6 +4882,12 @@ function handleClick() {
     raiseHoardings(sp.wall);
     return;
   }
+  if (tool === 'paint') {
+    const b = pickBuilding();
+    if (b) paintBuilding(b);
+    else msg('Click a building to paint its roof — keep clicking to cycle the dyes.', 'dim');
+    return;
+  }
   if (tool === 'demolish') {
     const b = pickBuilding();
     if (b) { demolish(b); saveGame(); return; }
@@ -4807,11 +4949,11 @@ function saveGame(key = 'bulwark-save') {
     localStorage.setItem(key, JSON.stringify({
       v: 3,
       gold:state.gold, wood:state.wood, stone:state.stone, food:state.food,
-      townName:state.townName, seed:state.seed, regionNm:state.regionNm, tutSkip:!!state.tutSkip,
+      townName:state.townName, seed:state.seed, regionNm:state.regionNm, tutSkip:!!state.tutSkip, crestVar:state.crestVar||0,
       difficulty:state.difficulty, roads:state.roads,
       pop:state.pop, maxPop:state.maxPop, rankIdx:state.rankIdx, time:state.time, raidNum:state.raidNum,
       sick:state.sick||0, edicts:state.edicts||{},
-      buildings: state.buildings.map(b => ({ type:b.type, x:b.x, z:b.z, rot:b.rot||0, hp:b.hp, ruined:b.ruined, day:b.day||1 })),
+      buildings: state.buildings.map(b => ({ type:b.type, x:b.x, z:b.z, rot:b.rot||0, hp:b.hp, ruined:b.ruined, day:b.day||1, tint:b.tint||undefined })),
       walls: state.walls.map(w => ({ poly:w.poly, path:w.path, closed:w.closed,
         tier:w.tier||'wall', breached:!!w.breached, hoardings:!!w.hoardings,
         gates: w.gates.map(g => ({ seg:g.seg, t:g.t, tier:g.tier, breach:!!g.breach })) })),
@@ -4830,7 +4972,9 @@ function loadGame() {
   state.sick = s.sick || 0;
   state.edicts = s.edicts || {};
   state.tutSkip = !!s.tutSkip;
-  scatterWorld(state.seed);
+  state.crestVar = s.crestVar || 0;
+  // region resolves by NAME — seeds are per-town now, not per-region
+  scatterWorld(state.seed, REGIONS.find(r => r.nm === state.regionNm) || REGIONS.find(r => r.seed === state.seed) || REGIONS[0]);
   state.roads = (s.roads || []).map(r2 => r2.length === 2 ? [r2[0], r2[1], 'road'] : r2);
   roadSet.clear();
   for (const [gx, gz, tk] of state.roads) { roadSet.set(`${gx},${gz}`, tk); stampRoadCell(gx, gz, tk); }
@@ -4861,6 +5005,7 @@ function loadGame() {
     const nb = placeBuilding(b.type, b.x, b.z, true, b.rot || 0);
     nb.hp = b.hp;
     nb.day = b.day || state.day;
+    if (b.tint) { nb.tint = b.tint; applyTint(nb, b.tint); }
     if (b.ruined) destroyBuilding(nb);
   }
   refreshDepths();
@@ -4874,12 +5019,17 @@ function newTownSetup(diff = 'standard') {
   state.wood = Math.round(120 * rm);
   state.stone = Math.round(155 * rm);
   state.food = Math.round(60 * rm);
-  state.townName = TOWN_PRE[Math.random()*TOWN_PRE.length|0] + TOWN_SUF[Math.random()*TOWN_SUF.length|0];
-  const region = REGIONS[Math.random()*REGIONS.length|0];
-  state.seed = region.seed;
+  // the founding screen may have set a name, seed and region already;
+  // otherwise the land and name are drawn fresh. Every town gets its OWN
+  // seed — two towns should never share a valley.
+  if (!state.townName) state.townName = TOWN_PRE[Math.random()*TOWN_PRE.length|0] + TOWN_SUF[Math.random()*TOWN_SUF.length|0];
+  const region = pendingRegion || REGIONS[Math.random()*REGIONS.length|0];
+  if (!pendingSeed) pendingSeed = ((Math.random()*0x7fffffff)|0) ^ region.seed;
+  state.seed = pendingSeed;
   state.regionNm = region.nm;
+  pendingSeed = 0; pendingRegion = null;
   makeCrest();
-  scatterWorld(region.seed);
+  scatterWorld(state.seed, region);
   for (const c of [...state.wild]) removeWild(c);   // the old land's animals go with it
   state.roads = [];
   roadSet.clear();
@@ -5528,6 +5678,14 @@ const ALM_DESC = {
   house:'A family home — 4 folk. With a well and market nearby it grows into a townhouse on its own — or pay to rebuild it at once.',
   longhouse:'A timber hall housing six under one long roof.',
   rowhouse:'A tall burgher block — seven folk on a modest plot.',
+  paint:'Three gold a coat. Click a roof to cycle it through the dyer’s palette — click past the last dye to strip it back.',
+  fence:'A run of split rails. Pens, garden edges, boundary lines — draw with it.',
+  planttree:'A sapling for inside the walls. It follows the seasons like its wild kin.',
+  maypole:'Ribbons for the green. The heart of any festival day.',
+  shrine:'A wayside shrine, candle lit. Travellers touch its stones for luck.',
+  beehives:'Straw skeps on a bench. The gardens hum for it.',
+  stall:'A single trader’s stand for a corner the market cart can’t reach.',
+  graveyard:'Rest for the departed. Every town of age keeps one.',
   woodpile:'Split and stacked. The town looks warmer for it.',
   cart:'A loaded handcart, resting between errands.',
   signpost:'Fingerposts for travellers. Purely for the look.',
@@ -5631,6 +5789,29 @@ document.querySelectorAll('.rico').forEach(el => { el.innerHTML = resSVG(el.data
 renderPalette();
 
 // ---------------------------------------------------------------- boot
+// the founding flow pre-rolls the land and lets the player name the town
+// and choose its arms before the first stone is laid
+let pendingSeed = 0, pendingRegion = null, pendingDiff = 'standard';
+function openFounding(diff) {
+  pendingDiff = diff;
+  pendingRegion = REGIONS[Math.random()*REGIONS.length|0];
+  pendingSeed = ((Math.random()*0x7fffffff)|0) ^ pendingRegion.seed;
+  state.crestVar = 0;
+  const nm = TOWN_PRE[Math.random()*TOWN_PRE.length|0] + TOWN_SUF[Math.random()*TOWN_SUF.length|0];
+  $('nameInput').value = nm;
+  $('found-region').textContent = `The charter grants land in ${pendingRegion.nm}.`;
+  refreshFoundingCrest();
+  $('diffrow').style.display = 'none';
+  $('foundrow').style.display = 'flex';
+  $('nameInput').focus();
+  $('nameInput').select();
+}
+function refreshFoundingCrest() {
+  state.townName = $('nameInput').value.trim() || 'Newtown';
+  state.seed = pendingSeed;
+  makeCrest();
+}
+
 function startGame(cont, diff = 'standard') {
   $('intro').style.display = 'none';
   state.started = true;
@@ -5662,11 +5843,15 @@ function startGame(cont, diff = 'standard') {
       $('diffrow').style.display = 'flex';
     };
     document.querySelectorAll('.diffbtn').forEach(b => {
-      b.onclick = () => {
-        localStorage.removeItem('bulwark-save');
-        startGame(false, b.dataset.diff);
-      };
+      b.onclick = () => openFounding(b.dataset.diff);
     });
+    $('nameInput').addEventListener('input', refreshFoundingCrest);
+    $('crestReroll').onclick = () => { state.crestVar = (state.crestVar || 0) + 1; refreshFoundingCrest(); AudioSys.play('click'); };
+    $('foundBtn').onclick = () => {
+      refreshFoundingCrest();
+      localStorage.removeItem('bulwark-save');
+      startGame(false, pendingDiff);
+    };
   }
 }
 
@@ -5688,6 +5873,7 @@ window.BULWARK = {
   seasonOf,
   setEdict, refreshJobs, workforce, staffEff, edictOn, isFestivalDay, isHolyDay,
   upgrade: (b) => tryUpgrade(b),
+  paint: (b) => paintBuilding(b),
   // debug capture: render into a target and read pixels — the canvas back
   // buffer is cleared after present on Windows, so toDataURL comes back blank
   shot: (q) => {

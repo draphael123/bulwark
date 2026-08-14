@@ -180,6 +180,39 @@ export const ICON = {
     <path d="M10 52 V26 H54 V52 Z M8 26 L32 12 L56 26"/>
     <path d="M16 52 V34 H24 V52 M40 52 V34 H48 V52 M28 40 H36 V52 H28 Z" stroke-width="1.7"/>
     <path d="M32 12 V6 M32 6 H42 L37 9 L42 12 H32" stroke-width="1.8"/></g>`,
+  paint: `<g ${S(2.4)}>
+    <path d="M40 10 L54 24 L30 48 Q22 52 18 48 Q14 44 18 36 Z"/>
+    <path d="M36 14 L50 28" stroke-width="1.8"/>
+    <path d="M18 48 Q10 52 8 56 Q14 56 20 52" stroke-width="2"/></g>`,
+  fence: `<g ${S(2.4)}>
+    <path d="M14 54 V26 L18 20 L22 26 V54 M42 54 V26 L46 20 L50 26 V54"/>
+    <path d="M8 34 H56 M8 46 H56" stroke-width="2.2"/></g>`,
+  planttree: `<g ${S(2.4)}>
+    <path d="M32 54 V34"/>
+    <circle cx="32" cy="24" r="14"/>
+    <circle cx="22" cy="30" r="8"/><circle cx="42" cy="30" r="8"/>
+    <path d="M32 42 L26 36 M32 46 L38 40" stroke-width="1.8"/></g>`,
+  maypole: `<g ${S(2.2)}>
+    <path d="M32 54 V10"/>
+    <circle cx="32" cy="10" r="3" stroke-width="1.8"/>
+    <path d="M32 12 Q18 26 12 46 M32 12 Q26 30 26 50 M32 12 Q46 26 52 46 M32 12 Q38 30 38 50" stroke-width="1.7"/></g>`,
+  shrine: `<g ${S()}>
+    <path d="M16 54 V24 Q32 10 48 24 V54 Z"/>
+    <path d="M26 54 V34 Q32 28 38 34 V54" stroke-width="2"/>
+    <path d="M32 40 V46 M29 43 H35" stroke-width="1.8"/></g>`,
+  beehives: `<g ${S(2.2)}>
+    <path d="M18 52 Q10 52 12 42 Q10 34 16 30 Q14 22 24 20 Q26 12 32 14 Q40 12 40 20 Q48 22 46 30 Q52 34 50 42 Q52 52 44 52 Z"/>
+    <path d="M16 44 H48 M18 36 H46 M22 28 H42" stroke-width="1.7"/>
+    <circle cx="32" cy="46" r="2.6" stroke-width="1.6"/></g>`,
+  stall: `<g ${S()}>
+    <path d="M10 24 L16 12 H48 L54 24 Q54 30 48 30 Q43 30 43 24 Q43 30 37 30 Q32 30 32 24 Q32 30 26 30 Q21 30 21 24 Q21 30 15 30 Q10 30 10 24 Z"/>
+    <path d="M16 30 V44 H48 V30 M16 44 H48" stroke-width="1.8"/>
+    <circle cx="26" cy="38" r="2.4" stroke-width="1.5"/><circle cx="38" cy="38" r="2.4" stroke-width="1.5"/></g>`,
+  graveyard: `<g ${S(2.2)}>
+    <path d="M16 54 V32 Q16 24 22 24 Q28 24 28 32 V54"/>
+    <path d="M38 54 V30 M32 36 H44" stroke-width="2.4"/>
+    <path d="M8 54 H56" stroke-width="2"/>
+    <path d="M48 50 Q52 46 50 42" stroke-width="1.5"/></g>`,
   woodpile: `<g ${S(2.2)}>
     <circle cx="20" cy="46" r="6"/><circle cx="33" cy="46" r="6"/><circle cx="46" cy="46" r="6"/>
     <circle cx="26" cy="35" r="6"/><circle cx="39" cy="35" r="6"/><circle cx="33" cy="24" r="6"/></g>`,

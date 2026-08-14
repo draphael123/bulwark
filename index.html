@@ -158,6 +158,15 @@
 
   .titlebtns { display:flex; flex-direction:column; gap:10px; align-items:center; margin:18px 0 8px; }
   .titlebtns button { width:260px; }
+  #foundrow { flex-direction:column; align-items:center; gap:10px; }
+  #nameInput {
+    font-family:inherit; font-size:20px; text-align:center; letter-spacing:1px;
+    width:280px; padding:8px 12px; color:#2a1f12;
+    background:#d9c9a8; border:1px solid #a89468; border-radius:6px;
+    box-shadow:inset 0 2px 4px #0003;
+  }
+  #nameInput:focus { outline:2px solid #d9a44a; }
+  #found-region { font-size:13px; font-style:italic; color:#9a8a68; }
   #diffrow { display:flex; }
   #diffrow .diffbtn { width:auto; padding:9px 14px; font-size:13px; letter-spacing:1px; }
   .panel button.secondary { background:none; border:1px solid #6b5427; color:#d9a44a; }
@@ -370,6 +379,15 @@
         <button class="secondary diffbtn" data-diff="peaceful" title="No raids, no fires — pure building">☮ PEACEFUL</button>
         <button class="secondary diffbtn" data-diff="standard" title="The intended experience">⚔ STANDARD</button>
         <button class="secondary diffbtn" data-diff="harsh" title="Bigger raids, hungrier fires, leaner start">🔥 HARSH</button>
+      </div>
+      <div id="foundrow" style="display:none">
+        <div class="crestSpot big" id="found-crest"></div>
+        <input type="text" id="nameInput" maxlength="18" spellcheck="false">
+        <div id="found-region"></div>
+        <div style="display:flex; gap:10px">
+          <button class="secondary" id="crestReroll" style="width:auto; font-size:13px; padding:9px 16px">⟳ NEW ARMS</button>
+          <button id="foundBtn" style="width:auto; font-size:15px; padding:9px 24px">FOUND THE TOWN</button>
+        </div>
       </div>
       <button id="titleSettings" class="secondary">SETTINGS</button>
     </div>

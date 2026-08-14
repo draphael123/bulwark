@@ -1,0 +1,14 @@
+{
+  "name": "BULWARK — the wall is the town",
+  "short_name": "BULWARK",
+  "description": "A medieval town builder where the wall is the town.",
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#0d0a06",
+  "theme_color": "#1b140c",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

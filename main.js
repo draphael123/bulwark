@@ -2,6 +2,7 @@
 // Closed wall rings define wards; nesting depth raises taxes; everything
 // outside the rings is raidable by bandits.
 import * as THREE from 'three';
+import { installTests } from './tests.js';
 import { AudioSys } from './audio.js';
 
 // ---------------------------------------------------------------- constants
@@ -2945,7 +2946,8 @@ setInterval(() => {
 }, 300);
 
 // ---------------------------------------------------------------- settings & saves
-const settings = Object.assign({ music:70, sfx:80, amb:60, shadows:true },
+// music is now real published tracks (Kevin MacLeod, CC BY 3.0) — modest default
+const settings = Object.assign({ music:45, sfx:80, amb:60, shadows:true },
   JSON.parse(localStorage.getItem('bulwark-settings') || '{}'));
 function applySettings(persist = true) {
   AudioSys.setVolumes({ music:settings.music/100, sfx:settings.sfx/100, amb:settings.amb/100 });
@@ -3097,6 +3099,26 @@ window.BULWARK = {
   cutGate: (x,z) => gateClickAt(x, z),
   removeWallAt: (x,z) => { const sp = wallSnap(x, z); if (sp) removeWall(sp.wall); return !!sp; },
   teleReport: () => buildTeleReport(),
+  save: (k) => saveGame(k),
+  seasonOf,
   start: () => { $('intro').style.display='none'; state.started = true; if (!state.buildings.length) newTownSetup(); },
   sim: (seconds, dt=0.1) => { for (let t=0;t<seconds;t+=dt) step(dt); return { ...state, buildings:state.buildings.length, walls:state.walls.length, bandits:state.bandits.length }; },
 };
+installTests();
+
+// crash guard: if anything blows up, save the town before it can be lost
+let crashShown = false;
+function crashToast(kind) {
+  try { saveGame(); } catch (e) {}
+  if (crashShown) return;
+  crashShown = true;
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;left:50%;top:64px;transform:translateX(-50%);z-index:40;' +
+    'background:#3a2016;border:1px solid #a3542a;color:#f0c9a8;border-radius:8px;' +
+    'padding:10px 18px;font-size:13px;font-family:Georgia,serif';
+  d.textContent = '⚠ Something went wrong — your town has been saved. Reload if the game misbehaves.';
+  document.body.appendChild(d);
+  setTimeout(() => d.remove(), 9000);
+}
+addEventListener('error', () => crashToast('error'));
+addEventListener('unhandledrejection', () => crashToast('promise'));

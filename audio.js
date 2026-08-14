@@ -9,11 +9,13 @@ let started = false;
 
 // ambience state
 let windSrc = null, cricketGain = null, birdTimer = 3, cricketLFO = null, rainGain = null;
-// music state
-let chordTimer = 1, pluckTimer = 4, chordIdx = 0;
-
-const SCALE = [146.83, 164.81, 174.61, 196.0, 220.0, 246.94, 293.66, 329.63]; // D dorian
-const CHORDS = [[0,2,4],[3,5,7],[1,3,5],[4,6,0]];
+// music: real published tracks — Kevin MacLeod (incompetech.com), CC BY 3.0
+const TRACKS = [
+  'music/master-of-the-feast.mp3',
+  'music/folk-round.mp3',
+  'music/minstrel-guild.mp3',
+];
+let musicEl = null, trackIdx = Math.floor(Math.random() * TRACKS.length);
 
 function ensure() {
   if (ctx) return true;
@@ -204,44 +206,36 @@ function birdChirp() {
 }
 
 // ---------------------------------------------------------------- music
-function padChord() {
-  const t = ctx.currentTime;
-  const chord = CHORDS[chordIdx % CHORDS.length];
-  chordIdx += (Math.random() < 0.7) ? 1 : 2;
-  for (const idx of chord) {
-    const base = SCALE[idx % SCALE.length] * (idx >= SCALE.length ? 2 : 1);
-    for (const det of [0, 1.004]) {
-      const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = base * det * 0.5;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.linearRampToValueAtTime(0.05, t+2.5);
-      g.gain.setValueAtTime(0.05, t+5.5);
-      g.gain.exponentialRampToValueAtTime(0.0001, t+9);
-      o.connect(g).connect(musBus); o.start(t); o.stop(t+9.2);
-    }
-  }
+function playTrack() {
+  if (!musicEl) return;
+  musicEl.src = TRACKS[trackIdx % TRACKS.length];
+  musicEl.volume = Math.min(1, vols.music * 0.55);
+  musicEl.play().catch(() => {});
 }
-function pluck() {
-  // Karplus-Strong: noise burst through a tuned feedback delay
-  const t = ctx.currentTime;
-  const note = SCALE[(Math.random()*SCALE.length)|0] * (Math.random() < 0.3 ? 2 : 1);
-  const burst = ctx.createBufferSource(); burst.buffer = noiseBuffer(0.02);
-  const delay = ctx.createDelay(0.05); delay.delayTime.value = 1/note;
-  const fb = ctx.createGain(); fb.gain.value = 0.965;
-  const damp = ctx.createBiquadFilter(); damp.type = 'lowpass'; damp.frequency.value = 3200;
-  const out = ctx.createGain(); out.gain.value = 0.16;
-  burst.connect(delay);
-  delay.connect(damp).connect(fb).connect(delay);
-  delay.connect(out).connect(musBus);
-  burst.start(t);
-  setTimeout(() => { try { fb.disconnect(); out.disconnect(); } catch(e){} }, 3200);
+function ensureMusic() {
+  if (vols.music <= 0.01) {
+    if (musicEl) musicEl.pause();
+    return;
+  }
+  if (!musicEl) {
+    musicEl = new Audio();
+    musicEl.addEventListener('ended', () => {
+      trackIdx++;
+      setTimeout(playTrack, 5000);   // a breath between tracks
+    });
+    playTrack();
+  } else {
+    musicEl.volume = Math.min(1, vols.music * 0.55);
+    if (musicEl.paused) musicEl.play().catch(() => {});
+  }
 }
 
 // ---------------------------------------------------------------- public API
 export const AudioSys = {
   init() {
-    if (started) { if (ctx && ctx.state === 'suspended') ctx.resume(); return; }
+    if (started) { if (ctx && ctx.state === 'suspended') ctx.resume(); ensureMusic(); return; }
     started = ensure();
+    ensureMusic();
   },
   play(name) {
     if (!started || !ctx) return;
@@ -259,19 +253,12 @@ export const AudioSys = {
       birdTimer = 2.5 + Math.random()*7;
       if (night < 0.4 && rain < 0.4) try { birdChirp(); } catch(e){}
     }
-    chordTimer -= dt;
-    if (chordTimer <= 0) { chordTimer = 8.5 + Math.random()*2; try { padChord(); } catch(e){} }
-    pluckTimer -= dt;
-    if (pluckTimer <= 0) {
-      pluckTimer = 1.6 + Math.random()*2.6;
-      if (Math.random() < 0.55) try { pluck(); } catch(e){}
-    }
   },
   setVolumes(v) {
     vols = { sfx: v.sfx ?? vols.sfx, music: v.music ?? vols.music, amb: v.amb ?? vols.amb };
+    if (started) ensureMusic();
     if (!ctx) return;
     sfxBus.gain.value = vols.sfx;
-    musBus.gain.value = vols.music * 0.5;
     ambBus.gain.value = vols.amb;
   },
 };

@@ -35,6 +35,12 @@ const BUILD_DEFS = {
   tower:      { nm:'Arrow Tower',w:2,  d:2,  hp:120, cost:{wood:20, stone:30},  range:24, dps:11 },
   ballista:   { nm:'Ballista',   w:3,  d:3,  hp:100, cost:{wood:50, gold:40},   range:34, boltDmg:60, boltCd:4.5 },
   barracks:   { nm:'Barracks',   w:4,  d:4,  hp:120, cost:{wood:40, stone:30, gold:50}, guards:3 },
+  infirmary:  { nm:'Infirmary',  w:3,  d:3,  hp:90,  cost:{wood:30, stone:20, gold:25}, boostR:20, needsWard:true },
+  bathhouse:  { nm:'Bathhouse',  w:3,  d:3,  hp:80,  cost:{stone:35, gold:20},  boostR:14, needsWard:true },
+  school:     { nm:'School',     w:3,  d:3,  hp:80,  cost:{wood:35, gold:30},   boostR:18, needsWard:true },
+  orchard:    { nm:'Orchard',    w:4,  d:4,  hp:40,  cost:{wood:20, gold:10},   foodPerDay:6 },
+  beacon:     { nm:'Beacon',     w:2,  d:2,  hp:60,  cost:{wood:20, stone:10} },
+  townhall:   { nm:'Town Hall',  w:4,  d:4,  hp:150, cost:{wood:60, stone:60, gold:80}, needsWard:true },
   garden:     { nm:'Garden',     w:2,  d:2,  hp:30,  cost:{wood:10, gold:5},    needsWard:true },
   fountain:   { nm:'Fountain',   w:2,  d:2,  hp:60,  cost:{stone:20, gold:15},  boostR:10, needsWard:true },
   bannerpole: { nm:'Banner',     w:2,  d:2,  hp:40,  cost:{wood:8, gold:5},     needsWard:true },
@@ -45,9 +51,10 @@ const BUILD_DEFS = {
 const TABS = [
   { id:'wallTab',  nm:'WALLS',  tools:['palisade','wall','highwall','woodgate','gate','greatgate'] },
   { id:'roadTab',  nm:'ROADS',  tools:['dirtroad','road','flagroad'] },
-  { id:'townTab',  nm:'TOWN',   tools:['hovel','house','well','granary','greatstore','market','tavern','chapel'] },
-  { id:'workTab',  nm:'WORKS',  tools:['farm','mill','woodcutter','sawmill','quarry','tradepost'] },
-  { id:'guardTab', nm:'GUARD',  tools:['stakes','watchpost','hoardings','moat','tower','ballista','barracks'] },
+  { id:'townTab',  nm:'TOWN',   tools:['hovel','house','well','granary','greatstore','market'] },
+  { id:'civicTab', nm:'CIVIC',  tools:['tavern','chapel','infirmary','bathhouse','school','townhall'] },
+  { id:'workTab',  nm:'WORKS',  tools:['farm','orchard','mill','woodcutter','sawmill','quarry','tradepost'] },
+  { id:'guardTab', nm:'GUARD',  tools:['stakes','watchpost','beacon','hoardings','moat','tower','ballista','barracks'] },
   { id:'decorTab', nm:'DECOR',  tools:['garden','fountain','bannerpole','statue'] },
 ];
 const WALL_TIERS = {
@@ -85,9 +92,9 @@ const GATE_COST = 10; // stone, for the Gate tool
 // ---------------------------------------------------------------- state
 const RANKS = [
   { pop: 0,  nm: 'Hamlet',  unlocks: ['palisade','wall','woodgate','dirtroad','road','hovel','house','farm','woodcutter','demolish'] },
-  { pop: 12, nm: 'Village', unlocks: ['gate','well','granary','quarry','mill','sawmill','tavern','watchpost','stakes'] },
-  { pop: 20, nm: 'Town',    unlocks: ['highwall','flagroad','market','chapel','tower','tradepost','fountain','garden','hoardings','moat'] },
-  { pop: 32, nm: 'City',    unlocks: ['greatgate','greatstore','barracks','statue','bannerpole','ballista'] },
+  { pop: 12, nm: 'Village', unlocks: ['gate','well','granary','quarry','mill','sawmill','tavern','watchpost','stakes','orchard','beacon'] },
+  { pop: 20, nm: 'Town',    unlocks: ['highwall','flagroad','market','chapel','tower','tradepost','fountain','garden','hoardings','moat','infirmary','bathhouse','school'] },
+  { pop: 32, nm: 'City',    unlocks: ['greatgate','greatstore','barracks','statue','bannerpole','ballista','townhall'] },
 ];
 
 // the year turns: 3 days a season, 12-day years. Farms follow the sun.
@@ -868,6 +875,77 @@ function buildMesh(type, bx = 0, bz = 0) {
     g.add(cyl(0.07, 0.07, 2.6, MAT.timber, 1.5, 1.3, -1.0, 5));
     const fl = box(0.05, 0.5, 0.8, MAT.banner, 1.5, 2.4, -0.6);
     fl.userData.isFlag = true; g.add(fl);
+  } else if (type === 'infirmary') {
+    g.add(box(2.7, 2.1, 2.7, MAT.plaster, 0, 1.05, 0));
+    const r = new THREE.Mesh(prismGeo(3.1, 1.4, 3.1), MAT.roofB);
+    r.position.y = 2.1; r.castShadow = true; g.add(r);
+    // the healer's cross over the door
+    g.add(box(0.5, 0.14, 0.1, new THREE.MeshLambertMaterial({ color:0xc23b2a }), 0, 2.55, 1.42));
+    g.add(box(0.14, 0.5, 0.1, new THREE.MeshLambertMaterial({ color:0xc23b2a }), 0, 2.55, 1.42));
+    g.add(box(0.9, 1.2, 0.08, MAT.timber, 0, 0.6, 1.36));
+    const win = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.5), MAT.window);
+    win.position.set(0, 1.5, 1.37); g.add(win);
+    const glow = new THREE.Sprite(MAT.windowGlow);
+    glow.scale.setScalar(1.5); glow.position.copy(win.position); g.add(glow);
+  } else if (type === 'bathhouse') {
+    g.add(box(2.8, 1.6, 2.6, MAT.stone, 0, 0.8, 0));
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(1.25, 10, 8, 0, Math.PI*2, 0, Math.PI/2), MAT.roofB);
+    dome.position.y = 1.6; dome.castShadow = true; g.add(dome);
+    g.add(cyl(0.14, 0.14, 1.2, MAT.stoneD, 0.9, 2.6, 0.7, 6));
+    // steam wisps
+    for (const [sx, sy] of [[0.9, 3.4], [0.6, 3.8]]) {
+      const st = new THREE.Sprite(new THREE.SpriteMaterial({ map:P_TEX, color:0xd8dde2, transparent:true, opacity:0.35, depthWrite:false }));
+      st.scale.setScalar(0.9); st.position.set(sx, sy, 0.7); g.add(st);
+    }
+    g.add(box(0.9, 1.1, 0.08, MAT.timber, 0, 0.55, 1.34));
+  } else if (type === 'school') {
+    g.add(box(2.7, 2.0, 2.4, MAT.plaster, 0, 1.0, 0));
+    for (const [px, pz] of [[-1.3,-1.15],[1.3,-1.15],[-1.3,1.15],[1.3,1.15]])
+      g.add(box(0.14, 2.0, 0.14, MAT.timber, px, 1.0, pz));
+    const r = new THREE.Mesh(prismGeo(3.1, 1.4, 2.8), MAT.roofD);
+    r.position.y = 2.0; r.castShadow = true; g.add(r);
+    // the school bell
+    g.add(box(0.7, 0.5, 0.5, MAT.timber, 0, 3.55, 0));
+    g.add(cone(0.16, 0.3, MAT.rankBanner, 0, 3.5, 0, 6));
+    g.add(box(0.9, 1.2, 0.08, MAT.timber, 0.6, 0.6, 1.24));
+  } else if (type === 'orchard') {
+    g.add(box(3.6, 0.15, 3.6, new THREE.MeshLambertMaterial({ color:0x5f7a44 }), 0, 0.08, 0));
+    const apple = new THREE.MeshLambertMaterial({ color:0x4f7a38 });
+    for (const [px, pz] of [[-1.1,-1.1],[1.1,-1.1],[-1.1,1.1],[1.1,1.1]]) {
+      g.add(cyl(0.1, 0.14, 1.0, MAT.timber, px, 0.5, pz, 5));
+      const crown = new THREE.Mesh(new THREE.SphereGeometry(0.65, 7, 6), apple);
+      crown.position.set(px, 1.35, pz); crown.castShadow = true; g.add(crown);
+      g.add(new THREE.Mesh(new THREE.SphereGeometry(0.07, 5, 4),
+        new THREE.MeshLambertMaterial({ color:0xc23b2a })).translateX(px+0.3).translateY(1.3).translateZ(pz+0.3));
+    }
+    for (const s of [-1,1]) {
+      g.add(box(3.8, 0.25, 0.1, MAT.timber, 0, 0.3, s*1.85));
+      g.add(box(0.1, 0.25, 3.8, MAT.timber, s*1.85, 0.3, 0));
+    }
+  } else if (type === 'beacon') {
+    g.add(cyl(0.55, 0.75, 3.8, MAT.stoneD, 0, 1.9, 0, 7));
+    g.add(cyl(0.75, 0.65, 0.5, MAT.stone, 0, 4.0, 0, 7));
+    const bowl = cyl(0.5, 0.35, 0.4, MAT.ruin, 0, 4.4, 0, 7);
+    g.add(bowl);
+    const fl = new THREE.Sprite(new THREE.SpriteMaterial({ map:P_TEX, color:0xff8a2a, transparent:true, opacity:0.9, blending:THREE.AdditiveBlending, depthWrite:false }));
+    fl.scale.setScalar(1.6); fl.position.y = 4.9; g.add(fl);
+  } else if (type === 'townhall') {
+    g.add(box(3.6, 2.6, 2.8, MAT.stone, 0, 1.3, 0));
+    const r = new THREE.Mesh(prismGeo(4.0, 1.8, 3.2), MAT.roofB);
+    r.position.y = 2.6; r.castShadow = true; g.add(r);
+    // belfry with the town's colours
+    g.add(box(1.0, 1.4, 1.0, MAT.plaster, 0, 4.1, 0));
+    g.add(cone(0.85, 1.0, MAT.roofB, 0, 5.3, 0, 4));
+    const fl = box(0.05, 0.9, 1.1, MAT.rankBanner, 0, 6.2, 0.55);
+    fl.userData.isFlag = true; g.add(fl);
+    g.add(cyl(0.05, 0.05, 1.6, MAT.timber, 0, 6.0, 0, 5));
+    for (const wx of [-1.2, 0, 1.2]) {
+      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.8), MAT.window);
+      win.position.set(wx, 1.5, 1.42); g.add(win);
+      const glow = new THREE.Sprite(MAT.windowGlow);
+      glow.scale.setScalar(1.4); glow.position.copy(win.position); g.add(glow);
+    }
+    g.add(box(1.1, 1.6, 0.1, MAT.timber, 0, 0.8, 1.42));
   } else if (type === 'stakes') {
     for (const [px, pz, tilt] of [[-0.6,-0.5,0.5],[0.3,-0.6,-0.4],[0.7,0.3,0.5],[-0.3,0.6,-0.5],[0,0,0.2]]) {
       const st = cyl(0.02, 0.12, 1.5, MAT.timber, px, 0.6, pz, 5);
@@ -2338,6 +2416,22 @@ function buildingInfoHTML(b) {
   if (!b.ruined && b.type === 'well') html += `\nwaters houses within ${def.coverR} — and fights fires`;
   if (!b.ruined && (b.type === 'mill' || b.type === 'sawmill')) html += `\nboosts ${b.type === 'mill' ? 'farms' : 'woodcutters'} within ${def.auraR}`;
   if (!b.ruined && b.type === 'tradepost') html += `\ncaravans pay extra here — but it stands unwalled`;
+  if (!b.ruined && b.type === 'infirmary') html += `\ntends the sick within ${def.boostR} — winter fevers halved`;
+  if (!b.ruined && b.type === 'bathhouse') html += `\nclean living within ${def.boostR} — fevers ×0.7`;
+  if (!b.ruined && b.type === 'school') html += `\na lettered town works smarter — workforce 70% → 80%`;
+  if (!b.ruined && b.type === 'orchard') html += `\n${def.foodPerDay} food/day${seasonOf(state.day).nm === 'Winter' ? ' — ×0.5 in winter' : ''} — needs no field hands beyond its keeper`;
+  if (!b.ruined && b.type === 'beacon') html += `\nthe watch lights it early — raid warning 45s → 75s`;
+  if (!b.ruined && b.buildT >= 1 && JOB_SLOTS[b.type])
+    html += `\n<span class="${(b.workers || 0) > 0 ? 'safe' : 'unsafe'}">⚒ ${b.workers || 0}/${b.jobs || JOB_SLOTS[b.type]} workers${(b.workers || 0) === 0 ? ' — idle, does nothing' : ''}</span>`;
+  if (!b.ruined && b.type === 'townhall' && b.buildT >= 1) {
+    html += (b.workers || 0) > 0
+      ? `\n<span class="safe">the council sits — proclaim edicts below</span>`
+      : `\n<span class="unsafe">no clerk — edicts suspended</span>`;
+    for (const [k, e] of Object.entries(EDICTS)) {
+      const on = !!(state.edicts || {})[k];
+      html += `\n<button class="edictbtn${on ? ' on' : ''}" data-edict="${k}">${on ? '✓ ' : ''}${e.nm}</button><span class="edictdesc">${e.desc}</span>`;
+    }
+  }
   if (!b.ruined && b.hp < b.maxHp - 0.5) html += `\n${Math.round(b.hp)}/${b.maxHp} hp`;
   return html;
 }
@@ -2364,6 +2458,14 @@ function selectBuilding(b) {
   card.style.display = 'block';
 }
 $('bcard-x').onclick = () => selectBuilding(null);
+// edict toggles live inside the re-rendered card body — delegate the clicks
+$('bcard-body').addEventListener('click', ev => {
+  const btn = ev.target.closest('[data-edict]');
+  if (!btn || !selB || selB.type !== 'townhall') return;
+  const k = btn.dataset.edict;
+  setEdict(k, !(state.edicts || {})[k]);
+  selectBuilding(selB);
+});
 $('bcard-demolish').onclick = () => {
   if (selB && selB.type !== 'keep') {
     demolish(selB);
@@ -2376,7 +2478,8 @@ function updateHUD() {
   $('r-wood').textContent = fmt(state.wood);
   $('r-stone').textContent = fmt(state.stone);
   $('r-food').textContent = `${fmt(state.food)}∕${foodCap()}`;
-  $('r-pop').textContent = `${fmt(state.pop)}/${popCap()}`;
+  $('r-pop').textContent = `${fmt(state.pop)}/${popCap()}${state.sick ? ` · ${state.sick} sick` : ''}`;
+  $('r-jobs').textContent = `${state.employed || 0}/${state.jobsTotal || 0}`;
   $('daycount').textContent = `${state.townName ? state.townName + ' — ' : ''}${RANKS[state.rankIdx].nm} · Day ${state.day} · ${seasonOf(state.day).nm}`;
   const warn = $('raidwarn');
   const raidsOn = DIFF[state.difficulty].raid > 0 && state.walls.length > 0;
@@ -2384,7 +2487,7 @@ function updateHUD() {
     warn.style.display = 'inline';
     warn.textContent = '⚠ RAID IN PROGRESS';
     warn.style.animation = '';
-  } else if (!state.over && raidsOn && state.raidTimer <= 45) {
+  } else if (!state.over && raidsOn && state.raidTimer <= (state.buildings.some(b => !b.ruined && b.buildT >= 1 && b.type === 'beacon') ? 75 : 45)) {
     warn.style.display = 'inline';
     warn.textContent = state.raidTimer < 15
       ? `⚠ RAIDERS FROM THE ${state.raidEdge.name} — ${Math.ceil(state.raidTimer)}s`
@@ -2416,7 +2519,12 @@ function foodCap() {
 }
 function foodRate() { // per day
   let r = 0;
-  for (const b of state.buildings) if (!b.ruined && b.type === 'farm') r += BUILD_DEFS.farm.foodPerDay;
+  const seas = seasonOf(state.day);
+  for (const b of state.buildings) {
+    if (b.ruined || b.buildT < 1) continue;
+    if (b.type === 'farm') r += BUILD_DEFS.farm.foodPerDay * seas.farm * (b._mill ? 1.25 : 1) * staffEff(b);
+    else if (b.type === 'orchard') r += BUILD_DEFS.orchard.foodPerDay * (seas.nm === 'Winter' ? 0.5 : 1) * staffEff(b);
+  }
   return r - state.pop * 0.5;
 }
 function coveredBy(b, type, r) {
@@ -2425,9 +2533,12 @@ function coveredBy(b, type, r) {
 // coverage flags are cached and refreshed only when buildings change —
 // the per-tick economy/fire/upgrade loops read b._well / b._mkt
 function coveredByBuilt(b, type, r) {
-  return state.buildings.some(o => !o.ruined && o.buildT >= 1 && o.type === type && Math.hypot(o.x-b.x, o.z-b.z) <= r);
+  return state.buildings.some(o => !o.ruined && o.buildT >= 1 && o.type === type
+    && (JOB_SLOTS[type] ? (o.workers || 0) > 0 : true)
+    && Math.hypot(o.x-b.x, o.z-b.z) <= r);
 }
 function refreshCoverage() {
+  refreshJobs();   // services only cover when someone staffs them
   for (const b of state.buildings) {
     if (b.ruined) { b._well = b._mkt = b._tav = b._chap = b._fnt = b._mill = b._saw = false; continue; }
     b._well = coveredByBuilt(b, 'well', BUILD_DEFS.well.coverR);
@@ -2444,6 +2555,76 @@ function refreshCoverage() {
     }
     b._road = nearFlagRoad(b.x, b.z);
   }
+}
+
+// ---------------------------------------------------------------- jobs
+// production and services need hands: workforce ≈ 70% of the well,
+// auto-assigned by priority. Understaffed buildings run proportionally slower.
+const JOB_SLOTS = {
+  farm:2, orchard:1, woodcutter:1, sawmill:1, quarry:2, mill:1,
+  market:2, tavern:1, tradepost:1, infirmary:1, bathhouse:1, school:1, chapel:1, townhall:1,
+};
+const JOB_PRIORITY = ['farm','orchard','woodcutter','quarry','mill','sawmill','market',
+  'tavern','infirmary','bathhouse','school','chapel','tradepost','townhall'];
+function workforce() {
+  const schooled = state.buildings.some(b => !b.ruined && b.buildT >= 1 && b.type === 'school' && b.workers > 0);
+  const ratio = schooled ? 0.8 : 0.7;
+  return Math.max(0, Math.floor((state.pop - (state.sick || 0)) * ratio));
+}
+function refreshJobs() {
+  let hands = workforce();
+  state.employed = 0;
+  state.jobsTotal = 0;
+  for (const t of JOB_PRIORITY) {
+    for (const b of state.buildings) {
+      if (b.type !== t || b.ruined || b.buildT < 1) continue;
+      b.jobs = JOB_SLOTS[t];
+      state.jobsTotal += b.jobs;
+      b.workers = Math.min(b.jobs, hands);
+      hands -= b.workers;
+      state.employed += b.workers;
+    }
+  }
+}
+function staffEff(b) {
+  if (!JOB_SLOTS[b.type]) return 1;
+  return b.jobs ? (b.workers || 0) / b.jobs : 1;
+}
+
+// ---------------------------------------------------------------- sickness
+// winter fevers thin the workforce; staffed infirmaries and bathhouses resist
+function sicknessDaily() {
+  if (seasonOf(state.day).nm !== 'Winter') {
+    const rec = Math.ceil((state.sick || 0) * 0.5);
+    if (rec > 0) { state.sick = Math.max(0, state.sick - rec); }
+    return;
+  }
+  let rate = 0.12;
+  const staffed = t => state.buildings.some(b => !b.ruined && b.buildT >= 1 && b.type === t && b.workers > 0);
+  if (staffed('infirmary')) rate *= 0.5;
+  if (staffed('bathhouse')) rate *= 0.7;
+  const fresh = Math.ceil(state.pop * rate * (0.6 + Math.random()*0.8));
+  const rec = Math.ceil((state.sick || 0) * 0.35);
+  state.sick = Math.max(0, Math.min(Math.floor(state.pop * 0.6), (state.sick || 0) + fresh - rec));
+  if (fresh > 2) msg(`Winter fever — ${fresh} folk take to their beds${staffed('infirmary') ? ', the infirmary tends them' : ''}.`, 'warn');
+}
+
+// ---------------------------------------------------------------- edicts
+const EDICTS = {
+  heavytax: { nm:'Heavy Taxes', desc:'Tax ×1.3, but folk settle half as fast' },
+  curfew:   { nm:'Curfew',      desc:'Fire risk halved, but taverns earn nothing' },
+  opengates:{ nm:'Open Gates',  desc:'Caravans pay ×1.3, but raids come larger' },
+};
+function townhallStaffed() {
+  return state.buildings.some(b => !b.ruined && b.buildT >= 1 && b.type === 'townhall' && b.workers > 0);
+}
+function edictOn(key) { return townhallStaffed() && !!(state.edicts || {})[key]; }
+function setEdict(key, val) {
+  state.edicts = state.edicts || {};
+  state.edicts[key] = !!val;
+  msg(val ? `Edict proclaimed: ${EDICTS[key].nm}.` : `Edict repealed: ${EDICTS[key].nm}.`, 'dim');
+  AudioSys.play('chime');
+  saveGame();
 }
 
 // population ranks — growth unlocks the deeper toolbox (high-water: never re-locks)
@@ -2550,7 +2731,7 @@ function fireTick(dt) {
   if (objAllDoneAt && state.fireCool <= 0) {
     for (const b of state.buildings) {
       if (b.ruined || b.onFire || b.depth < 1 || !FLAMMABLE[b.type]) continue;
-      const perSec = 0.0006 * DIFF[state.difficulty].fire * FLAMMABLE[b.type] * (b._well ? 0.3 : 1) * (state.raining ? 0.2 : 1);
+      const perSec = 0.0006 * DIFF[state.difficulty].fire * (edictOn('curfew') ? 0.5 : 1) * FLAMMABLE[b.type] * (b._well ? 0.3 : 1) * (state.raining ? 0.2 : 1);
       if (Math.random() < perSec * dt) {
         igniteBuilding(b);
         state.fireCool = 140 + Math.random()*80;
@@ -2628,6 +2809,7 @@ function caravanTick(dt) {
         let take = 10 + markets.length*4 + Math.min(20, Math.floor(state.pop/3));
         if (state.buildings.some(b => !b.ruined && b.buildT >= 1 && b.type === 'tradepost')) take += 10;
         if (state.walls.some(w => w.gates.some(g => g.tier === 'greatgate' && !g.breach))) take = Math.round(take * 1.25);
+        if (edictOn('opengates')) take = Math.round(take * 1.3);
         state.gold += take;
         teleEv('caravan_trade', take);
         AudioSys.play('coin');
@@ -2664,15 +2846,16 @@ function economyTick(dt) {
   const housesInside = [];
   for (const b of state.buildings) {
     if (b.ruined || b.buildT < 1) continue;   // under construction = not yet working
-    if (b.type === 'farm') state.food += BUILD_DEFS.farm.foodPerDay * (b._mill ? 1.25 : 1) * seasonOf(state.day).farm * (state.raining ? 1.25 : 1) * perDay;
-    else if (b.type === 'woodcutter') state.wood += BUILD_DEFS.woodcutter.woodPerDay * (b._saw ? 1.25 : 1) * perDay;
-    else if (b.type === 'quarry') state.stone += BUILD_DEFS.quarry.stonePerDay * perDay;
+    if (b.type === 'farm') state.food += BUILD_DEFS.farm.foodPerDay * staffEff(b) * (b._mill ? 1.25 : 1) * seasonOf(state.day).farm * (state.raining ? 1.25 : 1) * perDay;
+    else if (b.type === 'orchard') state.food += BUILD_DEFS.orchard.foodPerDay * staffEff(b) * (seasonOf(state.day).nm === 'Winter' ? 0.5 : 1) * perDay;
+    else if (b.type === 'woodcutter') state.wood += BUILD_DEFS.woodcutter.woodPerDay * staffEff(b) * (b._saw ? 1.25 : 1) * perDay;
+    else if (b.type === 'quarry') state.stone += BUILD_DEFS.quarry.stonePerDay * staffEff(b) * perDay;
     else if (BUILD_DEFS[b.type].popCap) {
       const occupants = BUILD_DEFS[b.type].popCap * Math.min(1, state.pop / Math.max(1, popCap()));
       let rate = b.depth >= 1 ? 2 * (1 + 0.25 * (b.depth - 1)) : 0.8;   // deep wards pay more; outside pays little
       if (b._mkt) rate *= 1.3;
       if (b._well) rate *= 1.15;
-      if (b._tav) rate *= 1.1;
+      if (b._tav && !edictOn('curfew')) rate *= 1.1;
       if (b._chap) rate *= 1.08;
       if (b._fnt) rate *= 1.05;
       if (b._road) rate *= 1.05;
@@ -2681,7 +2864,7 @@ function economyTick(dt) {
       if (b.depth >= 1) housesInside.push(b);
     }
   }
-  state.gold += tax * perDay;
+  state.gold += tax * (edictOn('heavytax') ? 1.3 : 1) * perDay;
   state.food = Math.max(0, state.food - state.pop * 0.5 * perDay);
   // stores are finite — surplus beyond the granaries spoils
   const cap = foodCap();
@@ -2695,7 +2878,7 @@ function economyTick(dt) {
   }
   // growth / starvation
   growthT += dt;
-  if (growthT >= 6) {
+  if (growthT >= (edictOn('heavytax') ? 12 : 6)) {
     growthT = 0;
     if (state.food <= 0 && state.pop > 2) { state.pop--; msg('The granary is empty — a family leaves.', 'warn'); }
     else if (state.food > state.pop * 1.5 && state.pop < popCap()) { state.pop++; }
@@ -2721,7 +2904,7 @@ function spawnRaid() {
   state.raidNum++;
   state.raidStats = { kills: 0, lost: 0 };
   const size = Math.max(1, Math.min(14,
-    Math.round((2 + Math.floor(state.day/3) + Math.floor(state.raidNum/4)) * DIFF[state.difficulty].raid)));
+    Math.round((2 + Math.floor(state.day/3) + Math.floor(state.raidNum/4)) * DIFF[state.difficulty].raid * (edictOn('opengates') ? 1.2 : 1))));
   const e = state.raidEdge;
   const roster = { raider:0, runner:0, brute:0, torch:0 };
   for (let i=0;i<size;i++){
@@ -3116,6 +3299,7 @@ const keys = {};
 addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'Escape') {
+    if ($('almanac').style.display !== 'none') { $('almanac').style.display = 'none'; return; }
     if ($('settings').style.display !== 'none') { $('settings').style.display = 'none'; return; }
     if (isWallTool(tool) && wallDraft.length) { wallDraft = []; startAttach = null; redrawWallPreview(); }
     else if (selB) selectBuilding(null);
@@ -3143,6 +3327,10 @@ addEventListener('keydown', e => {
     AudioSys.play('click');
   }
   if (e.code === 'KeyX') setTool('demolish');
+  if (e.code === 'KeyB' && state.started) {
+    const alm = $('almanac');
+    alm.style.display === 'flex' ? (alm.style.display = 'none') : openAlmanac();
+  }
   if (e.code === 'KeyR' && tool && BUILD_DEFS[tool]) ghostRot = (ghostRot + Math.PI/2) % (Math.PI*2);
   if (e.code === 'Space' && state.started && !state.over && $('settings').style.display === 'none') {
     e.preventDefault();
@@ -3315,6 +3503,7 @@ function saveGame(key = 'bulwark-save') {
       townName:state.townName, seed:state.seed, regionNm:state.regionNm,
       difficulty:state.difficulty, roads:state.roads,
       pop:state.pop, maxPop:state.maxPop, rankIdx:state.rankIdx, time:state.time, raidNum:state.raidNum,
+      sick:state.sick||0, edicts:state.edicts||{},
       buildings: state.buildings.map(b => ({ type:b.type, x:b.x, z:b.z, rot:b.rot||0, hp:b.hp, ruined:b.ruined })),
       walls: state.walls.map(w => ({ poly:w.poly, path:w.path, closed:w.closed,
         tier:w.tier||'wall', breached:!!w.breached, hoardings:!!w.hoardings,
@@ -3331,6 +3520,8 @@ function loadGame() {
   state.seed = s.seed || REGIONS[0].seed;
   state.regionNm = s.regionNm || REGIONS[0].nm;
   state.difficulty = DIFF[s.difficulty] ? s.difficulty : 'standard';
+  state.sick = s.sick || 0;
+  state.edicts = s.edicts || {};
   scatterWorld(state.seed);
   state.roads = (s.roads || []).map(r2 => r2.length === 2 ? [r2[0], r2[1], 'road'] : r2);
   roadSet.clear();
@@ -3399,8 +3590,12 @@ function step(dt) {
       msg(`${SEASON_MSGS[s]}`, s === 'Winter' ? 'warn' : 'dim');
       if (s === 'Winter' && state.food < state.pop * 1.5) msg('The stores look thin for winter.', 'warn');
     }
+    sicknessDaily();
     saveGame();
   }
+  // pop and sickness drift between building changes — re-deal jobs and coverage each second
+  state._jobT = (state._jobT || 0) - dt;
+  if (state._jobT <= 0) { state._jobT = 1; refreshCoverage(); }
   economyTick(dt);
   // raiders only muster once there are walls worth plundering — never on Peaceful
   if (state.walls.length && DIFF[state.difficulty].raid > 0) {
@@ -3871,6 +4066,115 @@ $('gearbtn').onclick = openSettings;
 $('titleSettings').onclick = openSettings;
 applySettings(false);
 
+// ---------------------------------------------------------------- the Almanac
+// every tool explained in one honest line, auto-built from the defs
+const ALM_DESC = {
+  palisade:'A timber ring — cheap and quick, but fire breaches it. Anything it encloses becomes a ward.',
+  wall:'Dressed stone. Does not burn. The bones of a lasting town.',
+  highwall:'Tall stone. Homes inside pay ×1.15 tax for the prestige.',
+  woodgate:'A door in the wall. Villagers pull the lever to pass; raiders cannot.',
+  gate:'An iron portcullis — opens twice as fast as wood.',
+  greatgate:'A ceremonial gate. Caravans that enter by it pay ×1.25.',
+  dirtroad:'Trodden earth. Folk walk ×1.2 along it.',
+  road:'Cobblestones. ×1.35 walking speed.',
+  flagroad:'Flagstones. ×1.5 speed — homes fronting them gain prestige.',
+  moat:'Dug water. Everything wades at half pace — dig it in a raider’s path.',
+  hoardings:'Timber galleries on a wall. Its sentries shoot raiders below.',
+  hovel:'The humblest roof — 2 folk. No services needed.',
+  house:'A family home — 4 folk. With a well and market nearby it grows into a townhouse.',
+  townhouse:'A grown house — 8 folk. In a deep ward with full services it becomes a manor.',
+  manor:'The pinnacle — 12 folk and handsome taxes. Only wards this rich grow one.',
+  well:'Waters homes within its reach (tax ×1.15) — and the bucket line fights fires.',
+  granary:'Stores 180 food. Without stores, winter eats the town.',
+  greatstore:'A stone warehouse — 400 food.',
+  market:'Stalls and trade — covered homes pay ×1.3 tax. Needs 2 traders.',
+  tavern:'Ale and news — covered homes pay ×1.1. Earns nothing under Curfew.',
+  chapel:'Bells and quiet — covered homes pay ×1.08, and folk take heart.',
+  farm:'12 food a day at full strength. Follows the seasons; a mill nearby adds ×1.25.',
+  orchard:'6 food a day, and half that in winter. Prettier than a field.',
+  mill:'Boosts every farm within its aura ×1.25.',
+  woodcutter:'8 wood a day. Must stand near living trees.',
+  sawmill:'Boosts every woodcutter within its aura ×1.25.',
+  quarry:'8 stone a day. Must stand near bare rock.',
+  tradepost:'Caravans pay extra at its yard — but it must stand outside the walls.',
+  stakes:'Sharpened stakes. Raiders that cross them bleed; the stakes wear out.',
+  watchpost:'A lookout with a bow. Short reach, cheap.',
+  tower:'A proper arrow tower — long reach, steady loosing.',
+  ballista:'A siege engine turned to defense. Slow, but one bolt fells most raiders.',
+  barracks:'Musters 3 guards who patrol and fight. Fallen guards are replaced in time.',
+  beacon:'A watch-fire on a mast. Raid warnings come at 75s instead of 45s.',
+  infirmary:'Tends the sick. Winter fevers strike half as often within its care.',
+  bathhouse:'Clean water and steam — fevers ×0.7 nearby.',
+  school:'A lettered town works smarter: workforce rises from 70% to 80% of the folk.',
+  townhall:'Seat of the council. A staffed hall may proclaim EDICTS — town-wide laws with a price.',
+  garden:'A green square. Purely for the eye.',
+  fountain:'Carved stone and water — covered homes pay ×1.05.',
+  bannerpole:'The town’s colours, flying.',
+  statue:'A founder in stone. Prestige for the plaza.',
+  keep:'The heart of the town. If the Keep falls, everything falls.',
+  demolish:'Tear a structure down for half its cost back.',
+};
+const ALM_TERMS = [
+  ['Ward','Land enclosed by an unbroken wall ring. Homes in a ward pay full tax; nest rings inside rings and each depth pays ×1.25 more. Outside the walls, homes cannot stand at all.'],
+  ['Breach','Fire eats palisades. A breached ring shelters no one until it is mended — click the gap with a wall tool (25 wood).'],
+  ['Workforce','About 70% of well folk can work (80% with a staffed school). Jobs fill by priority — farms first, town hall last. Understaffed buildings run proportionally slower; unstaffed services do nothing at all.'],
+  ['Sickness','Winter fevers send folk to bed, shrinking the workforce. A staffed infirmary halves the rate; a bathhouse cuts it further. The sick recover as the seasons warm.'],
+  ['Coverage','Wells, markets, taverns and the like serve a radius — and only while someone staffs them. Hover any home to see what reaches it.'],
+  ['Seasons','Three days each. Autumn harvests swell ×1.6; in winter the fields sleep and the town lives on its stores. Fill the granaries before the snow.'],
+  ['Raids','Once you raise walls, raiders come — runners are fast, brutes batter walls, torch-bearers set fires. A beacon lengthens the warning; guards, towers and moats answer it.'],
+  ['Edicts','Laws proclaimed from a staffed Town Hall. Heavy Taxes, Curfew, Open Gates — each pays one way and costs another. Repeal them any time.'],
+  ['Caravans','Merchants arrive by road to buy your surplus. A trade post and a Great Gate both raise the take; Open Gates raises it further but emboldens raiders.'],
+  ['Prestige','High walls and flagstone frontage make an address worth more — richer homes pay richer taxes.'],
+  ['Rank','The town’s title — Hamlet, Village, Town, City — follows its highest population ever reached, and each rank unlocks new tools. See THE LADDER.'],
+];
+let almTab = 'build';
+function renderAlmanac() {
+  const body = $('alm-body');
+  document.querySelectorAll('.almtab').forEach(el => el.classList.toggle('on', el.dataset.alm === almTab));
+  if (almTab === 'build') {
+    const seen = new Set();
+    let html = '';
+    const row = t => {
+      if (seen.has(t)) return;
+      seen.add(t);
+      const lockRank = toolLocked(t);
+      const icon = iconSVG(ICONALIAS[t] || t, 26);
+      const stats = [];
+      if (BUILD_DEFS[t] || WALL_TIERS[t] || GATE_TIERS[t] || ROAD_TIERS[t] || t === 'hoardings') stats.push(toolCostStr(t));
+      if (BUILD_DEFS[t] && BUILD_DEFS[t].popCap) stats.push(`${BUILD_DEFS[t].popCap} folk`);
+      if (JOB_SLOTS[t]) stats.push(`⚒ ${JOB_SLOTS[t]} worker${JOB_SLOTS[t] > 1 ? 's' : ''}`);
+      html += `<div class="almrow${lockRank ? ' locked' : ''}">
+        <div class="aico">${icon}</div>
+        <div><span class="anm">${TOOL_NAME(t)}${lockRank ? `<span class="alock">unlocks at ${lockRank.nm} (${lockRank.pop} folk)</span>` : ''}</span>
+        <div class="adesc">${ALM_DESC[t] || ''}</div>
+        <div class="astats">${stats.join(' · ')}</div></div></div>`;
+    };
+    const ICONALIAS = { townhouse:'house', manor:'house' };
+    row('keep');
+    for (const tb of TABS) for (const t of tb.tools) row(t);
+    for (const t of ['townhouse','manor']) row(t);
+    body.innerHTML = html;
+  } else if (almTab === 'terms') {
+    body.innerHTML = ALM_TERMS.map(([nm, d]) => `<div class="almterm"><b>${nm}</b> — ${d}</div>`).join('');
+  } else {
+    body.innerHTML = RANKS.map((r, i) => `<div class="almrank${i === state.rankIdx ? ' now' : ''}">
+      <div class="rnm">${i === state.rankIdx ? '⚜ ' : ''}${r.nm.toUpperCase()}</div>
+      <div class="rpop">${r.pop} folk</div>
+      <div class="runl">${r.unlocks.filter(t => t !== 'demolish').map(TOOL_NAME).join(' · ')}</div></div>`).join('')
+      + `<div style="padding:10px 6px; color:#8a7a58; font-size:12px">Rank follows the most folk the town has ever held — it never falls back.</div>`;
+  }
+}
+function openAlmanac() {
+  renderAlmanac();
+  $('almanac').style.display = 'flex';
+  AudioSys.play('click');
+}
+document.querySelectorAll('.almtab').forEach(el => {
+  el.onclick = () => { almTab = el.dataset.alm; renderAlmanac(); AudioSys.play('click'); };
+});
+$('bookbtn').onclick = openAlmanac;
+$('almClose').onclick = () => { $('almanac').style.display = 'none'; };
+
 // woodcut dress: resource glyphs and the first palette render
 document.querySelectorAll('.rico').forEach(el => { el.innerHTML = resSVG(el.dataset.r); });
 renderPalette();
@@ -3930,6 +4234,7 @@ window.BULWARK = {
   teleReport: () => buildTeleReport(),
   save: (k) => saveGame(k),
   seasonOf,
+  setEdict, refreshJobs, workforce, staffEff, edictOn,
   start: () => { $('intro').style.display='none'; state.started = true; if (!state.buildings.length) newTownSetup(); },
   sim: (seconds, dt=0.1) => { for (let t=0;t<seconds;t+=dt) step(dt); return { ...state, buildings:state.buildings.length, walls:state.walls.length, bandits:state.bandits.length }; },
 };

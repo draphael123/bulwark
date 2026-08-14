@@ -176,9 +176,10 @@ function runTests() {
   ok('ballista exists with bolt stats', !!bal && (window.BULWARK.state, true) && bal.type === 'ballista');
   // every building type must produce a mesh without throwing
   let meshOK = true;
-  const smokeTypes = ['hovel','manor','greatstore','tavern','chapel','mill','sawmill','tradepost','watchpost','stakes','ballista','garden','fountain','bannerpole','statue'];
+  const smokeTypes = ['hovel','manor','greatstore','tavern','chapel','mill','sawmill','tradepost','watchpost','stakes','ballista','garden','fountain','bannerpole','statue',
+    'infirmary','bathhouse','school','orchard','beacon','townhall'];
   try {
-    smokeTypes.forEach((t, i) => B.placeFree(t, -60 + i*8, -60));
+    smokeTypes.forEach((t, i) => B.placeFree(t, -60 + (i % 14)*8, -60 + Math.floor(i / 14)*10));
   } catch (e) { meshOK = false; }
   ok('all new building meshes construct', meshOK);
   // raider archetypes spawn
@@ -193,6 +194,37 @@ function runTests() {
   const vkinds = new Set(S.villagers.map(v => v.kind));
   ok('villagers come in kinds', vkinds.size >= 2);
   ok('critters roam the wards', S.critters.length >= 1);
+
+  // ---- jobs: hands fill by priority, sickness thins them
+  S.pop = 30; S.sick = 0;
+  B.refreshJobs();
+  ok('jobs exist and get filled', S.jobsTotal > 0 && S.employed > 0);
+  const farmJ = S.buildings.find(b => b.type === 'farm' && !b.ruined && b.buildT >= 1);
+  ok('farms staff first by priority', !!farmJ && farmJ.workers === farmJ.jobs);
+  ok('staffed farm runs at full strength', !!farmJ && B.staffEff(farmJ) === 1);
+  const wf0 = B.workforce();
+  S.sick = 10;
+  ok('the sick leave the workforce', B.workforce() < wf0);
+  S.sick = 0;
+
+  // ---- edicts need a staffed town hall
+  ok('edicts start unproclaimed', !B.edictOn('heavytax'));
+  const th = B.placeFree('townhall', 8, 30);
+  B.sim(9);   // build it
+  S.pop = 80;   // plenty of hands so the last-priority hall gets its clerk
+  B.refreshJobs();
+  ok('town hall staffs with enough folk', !!th && th.workers > 0);
+  B.setEdict('heavytax', true);
+  ok('edict proclaims when the council sits', B.edictOn('heavytax') === true);
+  B.setEdict('heavytax', false);
+  ok('edict repeals', B.edictOn('heavytax') === false);
+
+  // ---- almanac opens with content
+  document.getElementById('bookbtn').click();
+  const almBody = document.getElementById('alm-body').innerHTML;
+  ok('almanac lists the buildings', almBody.includes('Keep') && almBody.includes('Town Hall'));
+  document.getElementById('almClose').click();
+  ok('almanac closes', document.getElementById('almanac').style.display === 'none');
 
   // ---- telemetry
   const rep = B.teleReport();

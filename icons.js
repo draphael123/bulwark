@@ -144,6 +144,35 @@ export const ICON = {
     <path d="M12 20 Q32 34 52 20"/>
     <path d="M32 34 L32 12 M28 16 L32 10 L36 16" stroke-width="2.2"/>
     <path d="M22 52 H42" stroke-width="2.6"/></g>`,
+  infirmary: `<g ${S()}>
+    <path d="M12 30 L32 14 L52 30 V52 H12 Z"/>
+    <path d="M32 26 V42 M24 34 H40" stroke-width="3"/>
+    <path d="M12 30 H52" stroke-width="1.6"/></g>`,
+  bathhouse: `<g ${S()}>
+    <path d="M12 34 H52 V40 Q52 50 42 50 H22 Q12 50 12 40 Z"/>
+    <path d="M18 28 Q20 24 18 20 M28 28 Q30 24 28 20 M38 28 Q40 24 38 20 M48 28 Q50 24 48 20" stroke-width="2"/>
+    <path d="M20 54 V50 M44 54 V50" stroke-width="2.2"/></g>`,
+  school: `<g ${S()}>
+    <path d="M14 52 V30 L32 18 L50 30 V52 Z"/>
+    <path d="M32 18 V10 H40 V14 H32" stroke-width="2"/>
+    <path d="M22 38 H42 M22 44 H42 M22 41 H42" stroke-width="1.5"/>
+    <path d="M20 52 V34 H44 V52" stroke-width="1.8"/></g>`,
+  orchard: `<g ${S(2.2)}>
+    <path d="M18 52 V38 M46 52 V38 M32 52 V34"/>
+    <circle cx="18" cy="31" r="7"/><circle cx="46" cy="31" r="7"/><circle cx="32" cy="26" r="8"/>
+    <circle cx="15" cy="30" r="1.4" stroke-width="1.2"/><circle cx="35" cy="24" r="1.4" stroke-width="1.2"/><circle cx="48" cy="33" r="1.4" stroke-width="1.2"/>
+    <path d="M8 52 H56" stroke-width="2.4"/></g>`,
+  beacon: `<g ${S()}>
+    <path d="M24 52 L28 24 H36 L40 52 Z M20 52 H44"/>
+    <path d="M28 24 H36 M26 18 Q32 8 38 18 Q35 16 32 18 Q29 16 26 18" stroke-width="2"/>
+    <path d="M18 12 L22 16 M46 12 L42 16 M32 4 V9" stroke-width="1.8"/></g>`,
+  townhall: `<g ${S()}>
+    <path d="M10 52 V26 H54 V52 Z M8 26 L32 12 L56 26"/>
+    <path d="M16 52 V34 H24 V52 M40 52 V34 H48 V52 M28 40 H36 V52 H28 Z" stroke-width="1.7"/>
+    <path d="M32 12 V6 M32 6 H42 L37 9 L42 12 H32" stroke-width="1.8"/></g>`,
+  almanac: `<g ${S()}>
+    <path d="M32 14 Q22 8 12 10 V48 Q22 46 32 52 Q42 46 52 48 V10 Q42 8 32 14 Z M32 14 V52"/>
+    <path d="M17 20 H27 M17 26 H27 M37 20 H47 M37 26 H47 M17 32 H27" stroke-width="1.5"/></g>`,
   // ---- tools
   demolish: `<g ${S()}>
     <path d="M20 44 L40 24"/>
@@ -161,6 +190,7 @@ export const RES_ICON = {
   stone: `<g ${SC(3)}><path d="M14 46 L20 26 L38 20 L50 32 L46 46 Z"/><path d="M28 34 L38 30" stroke-width="1.8"/></g>`,
   food: `<g ${SC(2.6)}><path d="M32 54 V22"/><path d="M32 30 Q24 26 24 16 M32 30 Q40 26 40 16 M32 40 Q24 36 24 26 M32 40 Q40 36 40 26" stroke-width="2.2"/></g>`,
   folk: `<g ${SC(3)}><circle cx="32" cy="18" r="8"/><path d="M18 52 Q18 34 32 34 Q46 34 46 52 Z"/></g>`,
+  work: `<g ${SC(3)}><path d="M16 48 L34 30"/><path d="M30 16 L48 34 L42 40 L24 22 Z"/></g>`,
 };
 
 export function iconSVG(name, size = 26) {

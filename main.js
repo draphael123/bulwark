@@ -166,6 +166,99 @@ scene.background = new THREE.Color(0x86a3c3);
 scene.fog = new THREE.Fog(0x86a3c3, 200, 560);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 1, 800);
+
+// ---------------------------------------------------------------- the living woodcut
+// scene renders into a supersampled target with depth; a full-screen pass
+// draws ink where depth breaks, lays paper grain, and warms the corners.
+const INK_SS = 1.35;   // supersample — the ink pass replaces canvas MSAA
+function makeInkRT() {
+  const w = Math.round(innerWidth * Math.min(devicePixelRatio, 2) * INK_SS);
+  const h = Math.round(innerHeight * Math.min(devicePixelRatio, 2) * INK_SS);
+  const rt = new THREE.WebGLRenderTarget(w, h, {
+    minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+    type: THREE.HalfFloatType,   // keep HDR — tone mapping happens in the ink pass
+  });
+  rt.depthTexture = new THREE.DepthTexture(w, h);
+  return rt;
+}
+let inkRT = makeInkRT();
+const grainCanvas = document.createElement('canvas');
+grainCanvas.width = grainCanvas.height = 256;
+{
+  // drawn, never read back — canvas readback is spoofed on some profiles
+  const g = grainCanvas.getContext('2d');
+  g.fillStyle = '#808080'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 24000; i++) {
+    const v = 104 + Math.random() * 48 | 0;
+    g.fillStyle = `rgb(${v},${v},${v})`;
+    g.fillRect(Math.random()*256 | 0, Math.random()*256 | 0, 1, 1);
+  }
+}
+const grainTex = new THREE.CanvasTexture(grainCanvas);
+grainTex.wrapS = grainTex.wrapT = THREE.RepeatWrapping;
+const inkMat = new THREE.ShaderMaterial({
+  uniforms: {
+    tCol:   { value: inkRT.texture },
+    tDepth: { value: inkRT.depthTexture },
+    tGrain: { value: grainTex },
+    px:     { value: new THREE.Vector2(1/inkRT.width, 1/inkRT.height) },
+    camNear:{ value: 1 }, camFar: { value: 800 },
+    inkOn:  { value: 1 },
+  },
+  vertexShader: `varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tCol, tDepth, tGrain;
+    uniform vec2 px;
+    uniform float camNear, camFar, inkOn;
+    varying vec2 vUv;
+    float viewZ(vec2 uv) {
+      float z = texture2D(tDepth, uv).x;
+      return (camNear * camFar) / ((camFar - camNear) * z - camFar);   // negative
+    }
+    void main() {
+      vec3 col = texture2D(tCol, vUv).rgb;
+      if (inkOn > 0.5) {
+        float c  = viewZ(vUv);
+        float l  = viewZ(vUv - vec2(px.x, 0.0)), r2 = viewZ(vUv + vec2(px.x, 0.0));
+        float u2 = viewZ(vUv - vec2(0.0, px.y)), d  = viewZ(vUv + vec2(0.0, px.y));
+        float grad = max(max(abs(c-l), abs(c-r2)), max(abs(c-u2), abs(c-d)));
+        // threshold scales with distance so far hills don't crosshatch,
+        // and the ink fades out entirely toward the horizon
+        float t = 0.010 * abs(c) + 0.06;
+        float edge = smoothstep(t, t * 2.4, grad);
+        float fade = 1.0 - smoothstep(120.0, 380.0, abs(c));
+        col = mix(col, vec3(0.13, 0.10, 0.06), edge * 0.66 * fade);
+        // paper grain + a warm breathed-on vignette
+        float gr = texture2D(tGrain, vUv * vec2(6.0, 6.0)).r - 0.5;
+        col += gr * 0.045;
+        float vg = 1.0 - smoothstep(0.42, 0.92, distance(vUv, vec2(0.5)));
+        col *= mix(0.88, 1.0, vg);
+        col = mix(col, col * vec3(1.03, 0.99, 0.92), 1.0 - vg);
+      }
+      gl_FragColor = vec4(col, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+  depthWrite: false, depthTest: false,
+});
+const inkScene = new THREE.Scene();
+inkScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), inkMat));
+const inkCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+function renderWithInk() {
+  renderer.setRenderTarget(inkRT);
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(null);
+  renderer.render(inkScene, inkCam);
+}
+function resizeInkRT() {
+  inkRT.dispose();
+  if (inkRT.depthTexture) inkRT.depthTexture.dispose();
+  inkRT = makeInkRT();
+  inkMat.uniforms.tCol.value = inkRT.texture;
+  inkMat.uniforms.tDepth.value = inkRT.depthTexture;
+  inkMat.uniforms.px.value.set(1/inkRT.width, 1/inkRT.height);
+}
 const camTarget = new THREE.Vector3(0, 0, 0);
 let camYaw = Math.PI * 0.25, camPitch = 0.9, camDist = 62;
 function updateCamera() {
@@ -5017,14 +5110,14 @@ addEventListener('keydown', e => {
     renderPalette();
     AudioSys.play('click');
   }
-  if (e.code === 'KeyX') setTool('demolish');
-  if (e.code === 'KeyB' && state.started) {
+  if (e.code === K.demolish) setTool('demolish');
+  if (e.code === K.almanac && state.started) {
     const alm = $('almanac');
     alm.style.display === 'flex' ? (alm.style.display = 'none') : openAlmanac();
   }
-  if (e.code === 'KeyP' && state.started) setPhotoMode(!photoMode);
-  if (e.code === 'KeyR' && tool && BUILD_DEFS[tool]) ghostRot = (ghostRot + Math.PI/2) % (Math.PI*2);
-  if (e.code === 'Space' && state.started && !state.over && $('settings').style.display === 'none') {
+  if (e.code === K.photo && state.started) setPhotoMode(!photoMode);
+  if (e.code === K.rotate && tool && BUILD_DEFS[tool]) ghostRot = (ghostRot + Math.PI/2) % (Math.PI*2);
+  if (e.code === K.pause && state.started && !state.over && $('settings').style.display === 'none') {
     e.preventDefault();
     setSpeed(0);
   }
@@ -5106,6 +5199,7 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  resizeInkRT();
 });
 
 function snap(v) { return Math.round(v); }
@@ -5450,12 +5544,12 @@ function frame(dt) {
   // WASD pan
   const pan = camDist * 0.9 * dt;
   const fx = Math.sin(camYaw), fz = Math.cos(camYaw);
-  if (keys.KeyW || keys.ArrowUp)    { camTarget.x -= fx*pan; camTarget.z -= fz*pan; }
-  if (keys.KeyS || keys.ArrowDown)  { camTarget.x += fx*pan; camTarget.z += fz*pan; }
-  if (keys.KeyA || keys.ArrowLeft)  { camTarget.x -= fz*pan; camTarget.z += fx*pan; }
-  if (keys.KeyD || keys.ArrowRight) { camTarget.x += fz*pan; camTarget.z -= fx*pan; }
-  if (keys.KeyQ) camYaw += dt*1.6;
-  if (keys.KeyE) camYaw -= dt*1.6;
+  if (keys[K.panUp] || keys.ArrowUp)     { camTarget.x -= fx*pan; camTarget.z -= fz*pan; }
+  if (keys[K.panDown] || keys.ArrowDown) { camTarget.x += fx*pan; camTarget.z += fz*pan; }
+  if (keys[K.panLeft] || keys.ArrowLeft) { camTarget.x -= fz*pan; camTarget.z += fx*pan; }
+  if (keys[K.panRight] || keys.ArrowRight) { camTarget.x += fz*pan; camTarget.z -= fx*pan; }
+  if (keys[K.camL]) camYaw += dt*1.6;
+  if (keys[K.camR]) camYaw -= dt*1.6;
   camTarget.x = Math.max(-MAP, Math.min(MAP, camTarget.x));
   camTarget.z = Math.max(-MAP, Math.min(MAP, camTarget.z));
   updateCamera();
@@ -5671,7 +5765,8 @@ function frame(dt) {
   } else arrowEl.style.display = 'none';
 
   updateHUD();
-  renderer.render(scene, camera);
+  if (settings.ink !== false) renderWithInk();
+  else renderer.render(scene, camera);
 }
 
 let last = performance.now(), lastRAF = performance.now();
@@ -5810,12 +5905,26 @@ setInterval(() => {
 
 // ---------------------------------------------------------------- settings & saves
 // music is now real published tracks (Kevin MacLeod, CC BY 3.0) — modest default
-const settings = Object.assign({ music:45, sfx:80, amb:60, shadows:true },
+const KEY_DEFAULTS = {
+  panUp:'KeyW', panDown:'KeyS', panLeft:'KeyA', panRight:'KeyD',
+  camL:'KeyQ', camR:'KeyE', pause:'Space', demolish:'KeyX',
+  rotate:'KeyR', almanac:'KeyB', photo:'KeyP',
+};
+const KEY_LABELS = {
+  panUp:'Pan up', panDown:'Pan down', panLeft:'Pan left', panRight:'Pan right',
+  camL:'Turn camera left', camR:'Turn camera right', pause:'Pause',
+  demolish:'Demolish tool', rotate:'Rotate building', almanac:'Almanac', photo:'Photo mode',
+};
+const settings = Object.assign({ music:45, sfx:80, amb:60, shadows:true, ink:true },
   JSON.parse(localStorage.getItem('bulwark-settings') || '{}'));
+settings.keys = Object.assign({}, KEY_DEFAULTS, settings.keys || {});
+const K = settings.keys;
+const keyPretty = c => c === 'Space' ? 'SPACE' : c.replace('Key', '').replace('Digit', '').replace('Arrow', '');
 function applySettings(persist = true) {
   AudioSys.setVolumes({ music:settings.music/100, sfx:settings.sfx/100, amb:settings.amb/100 });
   sun.castShadow = settings.shadows;
   renderer.shadowMap.needsUpdate = true;
+  inkMat.uniforms.inkOn.value = settings.ink !== false ? 1 : 0;
   if (persist) localStorage.setItem('bulwark-settings', JSON.stringify(settings));
 }
 function slotMeta(key) {
@@ -5831,6 +5940,9 @@ function renderSlots() {
     ['bulwark-slot-1', 'Slot 1', true],
     ['bulwark-slot-2', 'Slot 2', true],
     ['bulwark-slot-3', 'Slot 3', true],
+    ['bulwark-slot-4', 'Slot 4', true],
+    ['bulwark-slot-5', 'Slot 5', true],
+    ['bulwark-slot-6', 'Slot 6', true],
   ];
   const el = $('slots');
   el.innerHTML = '';
@@ -5903,18 +6015,80 @@ function setPhotoMode(on) {
   }
 }
 
+// control rebinding: click a key button, press the new key
+let pendingBind = null;
+addEventListener('keydown', e => {
+  if (!pendingBind) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (e.code !== 'Escape') settings.keys[pendingBind] = e.code;
+  pendingBind = null;
+  applySettings();
+  renderKeybinds();
+}, true);
+function renderKeybinds() {
+  const el = $('keybinds');
+  if (!el) return;
+  el.innerHTML = '';
+  for (const action of Object.keys(KEY_DEFAULTS)) {
+    const row = document.createElement('div');
+    row.className = 'slotrow';
+    row.innerHTML = `<span class="snm">${KEY_LABELS[action]}</span><span class="smeta"></span>`;
+    const b = document.createElement('button');
+    b.textContent = pendingBind === action ? 'press a key…' : keyPretty(settings.keys[action]);
+    b.onclick = () => { pendingBind = action; renderKeybinds(); };
+    row.appendChild(b);
+    el.appendChild(row);
+  }
+  const row = document.createElement('div');
+  row.className = 'slotrow';
+  row.innerHTML = `<span class="snm"></span><span class="smeta">arrow keys always pan</span>`;
+  const rb = document.createElement('button');
+  rb.textContent = 'RESET';
+  rb.onclick = () => { Object.assign(settings.keys, KEY_DEFAULTS); applySettings(); renderKeybinds(); };
+  row.appendChild(rb);
+  el.appendChild(row);
+}
+// the sound test: every effect on a button, and the minstrel's setlist
+function renderSoundTest() {
+  const el = $('soundtest');
+  if (!el) return;
+  el.innerHTML = '';
+  const sfxRow = document.createElement('div');
+  sfxRow.className = 'sfxgrid';
+  for (const nm of AudioSys.patchNames()) {
+    const b = document.createElement('button');
+    b.textContent = nm;
+    b.onclick = () => { AudioSys.init(); AudioSys.play(nm); };
+    sfxRow.appendChild(b);
+  }
+  el.appendChild(sfxRow);
+  const mus = document.createElement('div');
+  mus.className = 'slotrow';
+  mus.innerHTML = `<span class="snm">Music</span><span class="smeta">♪ ${AudioSys.trackName()} · ${AudioSys.trackCount()} tunes in the songbook</span>`;
+  const nx = document.createElement('button');
+  nx.textContent = 'NEXT TUNE';
+  nx.onclick = () => { AudioSys.init(); AudioSys.nextTrack(); renderSoundTest(); };
+  mus.appendChild(nx);
+  el.appendChild(mus);
+}
+
 function openSettings() {
   $('set-music').value = settings.music;
   $('set-sfx').value = settings.sfx;
   $('set-amb').value = settings.amb;
   $('set-shadows').checked = settings.shadows;
+  $('set-ink').checked = settings.ink !== false;
   renderSlots();
+  renderKeybinds();
+  renderSoundTest();
   $('settings').style.display = 'flex';
 }
 $('set-music').oninput = e => { settings.music = +e.target.value; applySettings(); };
 $('set-sfx').oninput = e => { settings.sfx = +e.target.value; applySettings(); AudioSys.play('click'); };
 $('set-amb').oninput = e => { settings.amb = +e.target.value; applySettings(); };
 $('set-shadows').onchange = e => { settings.shadows = e.target.checked; applySettings(); };
+$('set-ink').onchange = e => { settings.ink = e.target.checked; applySettings(); };
 $('settingsClose').onclick = () => { $('settings').style.display = 'none'; };
 $('teleCopy').onclick = async () => {
   const report = buildTeleReport();
@@ -6175,9 +6349,17 @@ window.BULWARK = {
     updateAtmosphere();
     const w = Math.round(renderer.domElement.width * (scale || 0.5));
     const h = Math.round(renderer.domElement.height * (scale || 0.5));
-    const rt = new THREE.WebGLRenderTarget(w, h, { colorSpace: THREE.SRGBColorSpace });
-    renderer.setRenderTarget(rt);
-    renderer.render(scene, camera);
+    const rt = new THREE.WebGLRenderTarget(w, h);
+    if (settings.ink !== false) {
+      // through the woodcut chain, same as the screen
+      renderer.setRenderTarget(inkRT);
+      renderer.render(scene, camera);
+      renderer.setRenderTarget(rt);
+      renderer.render(inkScene, inkCam);
+    } else {
+      renderer.setRenderTarget(rt);
+      renderer.render(scene, camera);
+    }
     const buf = new Uint8Array(w * h * 4);
     renderer.readRenderTargetPixels(rt, 0, 0, w, h, buf);
     renderer.setRenderTarget(null);

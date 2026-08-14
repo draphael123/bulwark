@@ -274,4 +274,17 @@ export const AudioSys = {
     sfxBus.gain.value = vols.sfx;
     ambBus.gain.value = vols.amb;
   },
+  // sound test support: every patch name, the current tune, and a skip
+  patchNames() { return Object.keys(PATCHES); },
+  trackName() {
+    const t = TRACKS[trackIdx % TRACKS.length];
+    return t.replace('music/', '').replace('.mp3', '').replace(/-/g, ' ');
+  },
+  trackCount() { return TRACKS.length; },
+  nextTrack() {
+    trackIdx++;
+    if (!started) return;
+    if (musicEl) playTrack();
+    else ensureMusic();
+  },
 };

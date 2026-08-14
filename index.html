@@ -134,6 +134,7 @@
     border:1px solid #6b5427; border-radius:14px; box-shadow:0 12px 60px #000c;
   }
   .panel h1 { font-size:44px; letter-spacing:10px; color:#d9a44a; margin-bottom:2px; }
+  #wordmark { width:min(400px, 80vw); display:block; margin:0 auto 2px; filter:drop-shadow(0 2px 8px #000a); }
   .panel .tag { font-style:italic; color:#9a8a68; margin-bottom:22px; }
   .panel p { font-size:15px; line-height:1.65; color:#cbb98f; margin-bottom:14px; text-align:left; }
   .panel p b { color:#e8dcc2; }
@@ -182,6 +183,12 @@
     padding:4px 12px; background:none; border:1px solid #4a3a20; color:#cbb98f; border-radius:5px;
   }
   .slotrow button:hover { border-color:#d9a44a; color:#d9a44a; }
+  .sfxgrid { display:flex; flex-wrap:wrap; gap:5px; justify-content:center; margin:6px 0; }
+  .sfxgrid button {
+    font-family:inherit; font-size:11px; letter-spacing:.5px; cursor:pointer;
+    padding:4px 10px; background:none; border:1px solid #4a3a20; color:#cbb98f; border-radius:5px;
+  }
+  .sfxgrid button:hover { border-color:#d9a44a; color:#d9a44a; }
 
   /* ---------- edict toggles on the town-hall card ---------- */
   .edictbtn {
@@ -368,7 +375,23 @@
 
 <div class="overlay" id="intro">
   <div class="panel title-panel">
-    <h1>BULWARK</h1>
+    <svg id="wordmark" viewBox="0 0 460 96" aria-label="BULWARK">
+      <defs>
+        <filter id="woodcut-rough" x="-5%" y="-5%" width="110%" height="110%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="2" seed="11" result="n"/>
+          <feDisplacementMap in="SourceGraphic" in2="n" scale="3.6"/>
+        </filter>
+      </defs>
+      <g filter="url(#woodcut-rough)">
+        <path d="M92 18 H120 V8 H140 V18 H168 M200 18 H228 V8 H248 V18 H276 M308 18 H336 V8 H356 V18 H384"
+              stroke="#8a6a3a" stroke-width="3" fill="none"/>
+        <text x="230" y="66" text-anchor="middle" font-size="56" letter-spacing="9"
+              font-family="Georgia, 'Times New Roman', serif" font-weight="bold"
+              fill="#d9a44a" stroke="#241a10" stroke-width="2.2" paint-order="stroke">BULWARK</text>
+        <path d="M70 82 H390" stroke="#d9a44a" stroke-width="2.6" fill="none"/>
+        <path d="M118 89 H342" stroke="#8a6a3a" stroke-width="1.6" fill="none"/>
+      </g>
+    </svg>
     <div class="tag">the wall is the town</div>
     <p style="text-align:center">Ring the Keep in stone. Only inside walls can the town stand —
        and raiders burn whatever the walls don't hold.</p>
@@ -399,14 +422,19 @@
 </div>
 
 <div class="overlay" id="settings" style="display:none">
-  <div class="panel" style="min-width:460px">
+  <div class="panel" style="min-width:460px; max-height:88vh; overflow-y:auto">
     <h1 style="font-size:26px; letter-spacing:5px">SETTINGS</h1>
     <div class="setrow"><label>Music</label><input type="range" id="set-music" min="0" max="100"></div>
     <div class="setrow"><label>Sounds</label><input type="range" id="set-sfx" min="0" max="100"></div>
     <div class="setrow"><label>Ambience</label><input type="range" id="set-amb" min="0" max="100"></div>
     <div class="setrow"><label>Shadows</label><input type="checkbox" id="set-shadows"></div>
+    <div class="setrow"><label>Ink outlines</label><input type="checkbox" id="set-ink" title="The living-woodcut look"></div>
     <h1 style="font-size:16px; letter-spacing:4px; margin-top:18px; color:#cbb98f">LEDGER OF SAVES</h1>
     <div id="slots"></div>
+    <h1 style="font-size:16px; letter-spacing:4px; margin-top:18px; color:#cbb98f">CONTROLS</h1>
+    <div id="keybinds"></div>
+    <h1 style="font-size:16px; letter-spacing:4px; margin-top:18px; color:#cbb98f">SOUND TEST</h1>
+    <div id="soundtest"></div>
     <div style="display:flex; gap:10px; justify-content:center; margin-top:16px">
       <button id="teleCopy" class="secondary" style="font-size:13px; padding:8px 16px">📋 COPY PLAYTEST REPORT</button>
       <button id="settingsClose" style="font-size:13px; padding:8px 22px">CLOSE</button>

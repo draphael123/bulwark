@@ -215,6 +215,10 @@ function updateAtmosphere() {
     sun.intensity *= 1 - 0.5 * rainFactor;
     hemi.intensity *= 1 - 0.3 * rainFactor;
   }
+  // low mist hangs over the meadows around dawn
+  const mist = Math.max(0, 1 - Math.abs(f - 0.10) / 0.06) * (1 - rainFactor);
+  scene.fog.near = 200 - mist * 145;
+  scene.fog.far = 560 - mist * 250;
   nightFactor = Math.max(0, Math.min(1, 1 - (sun.intensity - 0.3) / 1.0));
   MAT.window.opacity = nightFactor * 0.95;
   // hearth-light: warmer and a touch stronger at night, with a candle flicker
@@ -492,13 +496,16 @@ function srand() { _seed = (_seed * 1664525 + 1013904223) >>> 0; return _seed / 
 const REGIONS = [
   { seed: 11813, nm: 'the Greenmere Vale', trees: 190, rocks: 42,
     broadleaf: 0.60, leafH: 0.27, tint: 0xffffff, flowers: 240,
-    patches: ['#87a94e', '#6c8f3d'], landmark: 'stones' },
+    patches: ['#87a94e', '#6c8f3d'], landmark: 'stones',
+    skin: { plaster: 0xffffff, roofs: 0xffffff, timber: 0x6e4a2a } },
   { seed: 40427, nm: 'the Eastmarch Downs', trees: 130, rocks: 58,
     broadleaf: 0.22, leafH: 0.22, tint: 0xf5eecf, flowers: 90,
-    patches: ['#a39b55', '#8a8a4a'], landmark: 'arch' },
+    patches: ['#a39b55', '#8a8a4a'], landmark: 'arch',
+    skin: { plaster: 0xf5edd8, roofs: 0xe9ddb8, timber: 0x82684a } },
   { seed: 90210, nm: 'the Thornwood Edge',  trees: 250, rocks: 34,
     broadleaf: 0.42, leafH: 0.31, tint: 0xdbe8cd, flowers: 60,
-    patches: ['#4f7038', '#68854a'], landmark: 'waystone' },
+    patches: ['#4f7038', '#68854a'], landmark: 'waystone',
+    skin: { plaster: 0xcfc2a8, roofs: 0xc4cdb8, timber: 0x503b28 } },
 ];
 const trees = [], rocks = [];
 let worldMeshes = [];
@@ -609,8 +616,36 @@ function scatterWorld(seed, cfg) {
   addWorld(flwI);
   seasonMats.leaves = [pineI.material, blobI.material, tuftI.material];
 
+  // leaf litter under the trees — autumn's carpet, faded elsewhere
+  if (trees.length) {
+    const litG = new THREE.CircleGeometry(0.22, 5);
+    litG.rotateX(-Math.PI/2);
+    const LN = Math.min(300, trees.length * 2);
+    const litM = new THREE.MeshLambertMaterial({ color:0xffffff, transparent:true, opacity:0, depthWrite:false });
+    const litI = new THREE.InstancedMesh(litG, litM, LN);
+    for (let i = 0; i < LN; i++) {
+      const t = trees[i % trees.length];
+      const x = t.x + (srand()-0.5)*5.5, z = t.z + (srand()-0.5)*5.5;
+      q.setFromEuler(new THREE.Euler(0, srand()*Math.PI*2, 0));
+      m4.compose(new THREE.Vector3(x, groundY(x, z) + 0.045, z), q, s.set(0.7+srand()*0.9, 1, 0.7+srand()*0.9));
+      litI.setMatrixAt(i, m4);
+      litI.setColorAt(i, tCol.setHSL(0.07 + srand()*0.05, 0.55, 0.34 + srand()*0.1, THREE.SRGBColorSpace));
+    }
+    addWorld(litI);
+    seasonMats.litterMat = litM;
+  }
+
   // region ground character: tint + painted meadow/clay blotches
   _regionTint.setHex(cfg.tint || 0xffffff);
+  // and its building culture: plaster, roof wash, timber stain
+  const sk = cfg.skin || REGIONS[0].skin;
+  if (sk) {
+    MAT.plaster.color.setHex(sk.plaster);
+    MAT.roof.color.setHex(sk.roofs);
+    MAT.roofD.color.setHex(sk.roofs);
+    MAT.roofB.color.setHex(sk.roofs);
+    MAT.timber.color.setHex(sk.timber);
+  }
   patchCtx.clearRect(0, 0, 512, 512);
   const P_EXT = 320;   // patch plane is 640 across
   for (let i = 0; i < 30; i++) {
@@ -880,6 +915,35 @@ function scarecrow(g, vh, x, z) {
   g.add(new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 5), new THREE.MeshLambertMaterial({ color:0xd9c05a })).translateX(x).translateY(1.55).translateZ(z));
   g.add(cone(0.22, 0.22, MAT.roofD, x, 1.75, z, 6));
 }
+// wire a fresh building group: collect animated bits and blanket roofs for winter
+const SNOW_M = new THREE.MeshLambertMaterial({ color:0xe9eef3 });
+let winterVisible = false;
+function wireGroup(b, group) {
+  b._flags = []; b._chims = []; b._sway = []; b._snow = []; b._vanes = [];
+  const roofs = [];
+  group.traverse(o => {
+    o.userData.b = b;
+    if (o.userData.isFlag) b._flags.push(o);
+    if (o.userData.isBlades) b._blades = o;
+    if (o.userData.isChimney) b._chims.push(o);
+    if (o.userData.isCloth) b._sway.push(o);
+    if (o.userData.isVane) b._vanes.push(o);
+    if (o.isMesh && !o.userData.isSnow &&
+        (o.material === MAT.roof || o.material === MAT.roofD || o.material === MAT.roofB)) roofs.push(o);
+  });
+  for (const o of roofs) {
+    const cap = new THREE.Mesh(o.geometry, SNOW_M);
+    cap.position.copy(o.position);
+    cap.rotation.copy(o.rotation);
+    cap.scale.copy(o.scale).multiplyScalar(1.045);
+    cap.userData.isSnow = true;
+    cap.userData.b = b;
+    cap.visible = winterVisible;
+    (o.parent || group).add(cap);
+    b._snow.push(cap);
+  }
+}
+
 // old roofs gather moss — added once when a building has stood six days
 function mossify(b) {
   b._mossed = true;
@@ -905,6 +969,31 @@ function buildMesh(type, bx = 0, bz = 0) {
     const c = box(w, h, d, MAT.stoneD, x, y, z);
     c.userData.isChimney = true;
     return c;
+  };
+  // weather vanes swing to the wind in the frame pass
+  const mkVane = (x, y, z) => {
+    const v = new THREE.Group();
+    v.add(cyl(0.025, 0.025, 0.45, MAT.ruin, 0, 0.22, 0, 4));
+    v.add(box(0.55, 0.04, 0.04, MAT.ruin, 0, 0.44, 0));
+    v.add(box(0.1, 0.13, 0.03, MAT.ruin, -0.27, 0.44, 0));
+    const head = cone(0.05, 0.16, MAT.ruin, 0.3, 0.44, 0, 4);
+    head.rotation.z = -Math.PI/2;
+    v.add(head);
+    v.position.set(x, y, z);
+    v.userData.isVane = true;
+    return v;
+  };
+  const mkCat = (x, y, z) => {
+    const catM = new THREE.MeshLambertMaterial({ color:0x24211d });
+    const cat = new THREE.Group();
+    cat.add(box(0.17, 0.13, 0.32, catM, 0, 0.07, 0));
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.085, 5, 4), catM);
+    head.position.set(0, 0.15, 0.17); cat.add(head);
+    for (const sc of [-1, 1]) cat.add(cone(0.03, 0.07, catM, sc*0.05, 0.23, 0.17, 4));
+    cat.add(box(0.04, 0.04, 0.2, catM, 0.08, 0.05, -0.24));
+    cat.position.set(x, y, z);
+    cat.rotation.y = vh * Math.PI * 2;
+    return cat;
   };
   if (type === 'house') {
     const roofM = [MAT.roof, MAT.roofD, MAT.roofB][(vh*3)|0];
@@ -955,6 +1044,9 @@ function buildMesh(type, bx = 0, bz = 0) {
       g.add(new THREE.Mesh(new THREE.SphereGeometry(0.07, 5, 4),
         new THREE.MeshLambertMaterial({ color: [0xd96a6a, 0xf2d24b, 0xc9a3e8][((vh*19)|0) % 3] })).translateX(wx).translateY(0.95).translateZ(1.38));
     }
+    // roof jewelry: a vane on some ridges, a cat asleep on others
+    if (variant === 0 && (vh*47) % 1 < 0.25) g.add(mkVane(0, 3.5, -0.9));
+    else if (variant === 0 && (vh*53) % 1 < 0.16) g.add(mkCat(0, 3.45, 0.55));
     g.rotation.y = ((vh*16)|0) % 4 * Math.PI/2;
     g.rotation.z = (vh - 0.5) * 0.02;   // a little honest lean
     for (const [wx, wz, ry] of [[-0.7, 1.3, 0], [0.7, 1.3, 0]]) {
@@ -1068,6 +1160,7 @@ function buildMesh(type, bx = 0, bz = 0) {
     g.add(box(1.3, 4.2, 1.3, MAT.stone, 0, 2.1, -1.9));
     g.add(cone(1.05, 1.9, MAT.roofB, 0, 5.1, -1.9, 4));
     g.add(cyl(0.05, 0.05, 0.9, MAT.rankBanner, 0, 6.3, -1.9, 4));
+    g.add(mkVane(0, 4.3, 1.5));
     const win = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 1.0), MAT.window);
     win.position.set(0, 1.4, 2.22); g.add(win);
     const glow = new THREE.Sprite(MAT.windowGlow);
@@ -1178,6 +1271,7 @@ function buildMesh(type, bx = 0, bz = 0) {
       glow.scale.setScalar(1.4); glow.position.copy(win.position); g.add(glow);
     }
     g.add(box(1.1, 1.6, 0.1, MAT.timber, 0, 0.8, 1.42));
+    g.add(mkVane(0, 4.4, -1.2));
   } else if (type === 'stakes') {
     for (const [px, pz, tilt] of [[-0.6,-0.5,0.5],[0.3,-0.6,-0.4],[0.7,0.3,0.5],[-0.3,0.6,-0.5],[0,0,0.2]]) {
       const st = cyl(0.02, 0.12, 1.5, MAT.timber, px, 0.6, pz, 5);
@@ -1271,6 +1365,17 @@ function buildMesh(type, bx = 0, bz = 0) {
     const h1 = cyl(0.45, 0.45, 0.9, hay, -2.3*bs, 0.45, 2.3, 8); h1.rotation.z = Math.PI/2; g.add(h1);
     const h2 = cyl(0.4, 0.4, 0.8, hay, -2.3*bs, 1.1, 2.3, 8); h2.rotation.z = Math.PI/2; g.add(h2);
     if ((vh*17) % 1 < 0.45) scarecrow(g, vh, -0.6*bs, -0.8);
+    if ((vh*29) % 1 < 0.35) {   // a dovecote, doves and all
+      const px = 2.3*bs, pz = -2.3;
+      g.add(cyl(0.06, 0.08, 2.0, MAT.timber, px, 1.0, pz, 5));
+      g.add(box(0.55, 0.5, 0.55, MAT.plaster, px, 2.2, pz));
+      g.add(cone(0.45, 0.4, MAT.roofD, px, 2.65, pz, 4));
+      const doveM = new THREE.MeshLambertMaterial({ color:0xe8e6e0 });
+      for (const [dx, dy, dz] of [[0.28, 2.5, 0], [-0.2, 0.06, 0.5]]) {
+        const dv = new THREE.Mesh(new THREE.SphereGeometry(0.07, 5, 4), doveM);
+        dv.position.set(px+dx, dy, pz+dz); dv.scale.z = 1.3; g.add(dv);
+      }
+    }
     if ((vh*23) % 1 < 0.5) {   // split-rail fence along the lane side
       for (let i = 0; i < 4; i++) g.add(cyl(0.06, 0.07, 0.8, MAT.timber, -2.6 + i*1.75, 0.4, -2.75, 4));
       g.add(box(5.3, 0.08, 0.08, MAT.timber, 0, 0.62, -2.75));
@@ -1477,14 +1582,16 @@ function ambientTick(dt) {
     }
     p.needsUpdate = true;
   }
-  // leaves drift down all through autumn
-  const lTarget = (state.started && seasonNm === 'Autumn' && !state.raining) ? 0.8 : 0;
+  // leaves drift down all through autumn — and blossom petals through spring
+  const spring = seasonNm === 'Spring';
+  leafPts.material.color.setHex(spring ? 0xf2c9d8 : 0xd9a860);
+  const lTarget = (state.started && (seasonNm === 'Autumn' || spring) && !state.raining) ? (spring ? 0.6 : 0.8) : 0;
   leafPts.material.opacity += (lTarget - leafPts.material.opacity) * Math.min(1, dt*0.5);
   if (leafPts.material.opacity > 0.03) {
     leafPts.position.set(camTarget.x, 0, camTarget.z);
     const p = leafPts.geometry.attributes.position;
     for (let i=0;i<LEAF_N;i++){
-      let y = p.getY(i) - dt * (1.0 + (i % 4) * 0.3);
+      let y = p.getY(i) - dt * (1.0 + (i % 4) * 0.3) * (spring ? 0.55 : 1);
       p.setX(i, p.getX(i) + Math.sin(state.time*1.5 + i) * dt * 1.6);
       if (y < 0) {
         y = 10 + Math.random()*8;
@@ -1502,6 +1609,17 @@ function seasonVisualTick(dt) {
   const k = Math.min(1, dt * 0.35);
   ground.material.color.lerp(_seasonCol.setHex(s.ground).multiply(_regionTint), k);
   for (const m of seasonMats.leaves) m.color.lerp(_seasonCol.setHex(s.leaf), k);
+  // roofs take their snow blankets on and off with the season
+  const wNow = s.nm === 'Winter';
+  if (wNow !== winterVisible) {
+    winterVisible = wNow;
+    for (const b of state.buildings) if (b._snow) for (const c of b._snow) c.visible = wNow;
+  }
+  // autumn's leaf carpet fades in and lingers into the snow
+  if (seasonMats.litterMat) {
+    const lt = s.nm === 'Autumn' ? 0.85 : s.nm === 'Winter' ? 0.2 : 0;
+    seasonMats.litterMat.opacity += (lt - seasonMats.litterMat.opacity) * Math.min(1, dt * 0.3);
+  }
 }
 function rainVisualTick(dt) {
   const target = (state.raining ? 1 : 0);
@@ -2426,9 +2544,7 @@ function placeBuilding(type, x, z, free=false, rot=0) {
       b._crew.push({ grp: wgrp, bob: Math.random()*6 });
     }
   }
-  b._flags = []; b._chims = []; b._sway = [];
-  group.traverse(o => { o.userData.b = b; if (o.userData.isFlag) b._flags.push(o); if (o.userData.isBlades) b._blades = o;
-    if (o.userData.isChimney) b._chims.push(o); if (o.userData.isCloth) b._sway.push(o); });
+  wireGroup(b, group);
   state.buildings.push(b);
   refreshCoverage();
   stampFoundation(x, z, def.w, def.d);
@@ -3119,6 +3235,48 @@ function sicknessDaily() {
   if (fresh > 2) msg(`Winter fever — ${fresh} folk take to their beds${staffed('infirmary') ? ', the infirmary tends them' : ''}.`, 'warn');
 }
 
+// ---------------------------------------------------------------- occasions
+// special days derive from the calendar — nothing extra to save
+function isFestivalDay(day) { return seasonOf(day).nm === 'Autumn' && ((day - 1) % 3) === 0; }
+function isHolyDay(day) { return day % 6 === 0; }
+let festGroup = null;
+function refreshOccasions(announce) {
+  state.festivalBias = isFestivalDay(state.day);
+  state.holyBias = isHolyDay(state.day)
+    && state.buildings.some(b => !b.ruined && b.buildT >= 1 && b.type === 'chapel');
+  if (festGroup) { scene.remove(festGroup); disposeGroup(festGroup); festGroup = null; }
+  const keep = state.buildings.find(b => b.type === 'keep' && !b.ruined);
+  if (state.festivalBias && keep) {
+    // pennant strings from the keep turrets out to poles in the yard
+    festGroup = new THREE.Group();
+    const cols = [0xc23b2a, 0xd9a44a, 0x4a6a9c, 0x5a7a4a];
+    for (let k = 0; k < 4; k++) {
+      const a = k * Math.PI/2 + Math.PI/4;
+      const ex = Math.sin(a) * 8, ez = Math.cos(a) * 8;
+      festGroup.add(cyl(0.05, 0.07, 2.6, MAT.timber, ex, 1.3, ez, 5));
+      for (let i = 1; i <= 5; i++) {
+        const t = i / 6;
+        const x = THREE.MathUtils.lerp(Math.sin(a)*2.6, ex, t);
+        const z = THREE.MathUtils.lerp(Math.cos(a)*2.6, ez, t);
+        const y = THREE.MathUtils.lerp(5.6, 2.6, t) - Math.sin(t * Math.PI) * 0.5;
+        const p = cone(0.14, 0.34, new THREE.MeshLambertMaterial({ color: cols[(k + i) % 4] }), x, y, z, 4);
+        p.rotation.x = Math.PI;
+        festGroup.add(p);
+      }
+    }
+    festGroup.position.set(keep.x, 0, keep.z);
+    scene.add(festGroup);
+    if (announce) {
+      msg('Harvest festival! The town gathers at the Keep.', 'good');
+      AudioSys.play('fanfare');
+      teleEv('festival');
+    }
+  } else if (state.holyBias && announce) {
+    msg('The chapel bell rings out — a holy day.', 'dim');
+    AudioSys.play('bell');
+  }
+}
+
 // ---------------------------------------------------------------- edicts
 const EDICTS = {
   heavytax: { nm:'Heavy Taxes', desc:'Tax ×1.3, but folk settle half as fast' },
@@ -3162,6 +3320,8 @@ function rankTick() {
     void toast.offsetWidth;   // restart the animation
     toast.classList.add('show');
     AudioSys.play('fanfare');
+    // the whole town throws its hands up
+    for (const v of state.villagers) v.cheer = 4 + Math.random() * 4;
     refreshPaletteLocks();
     saveGame();
   }
@@ -3179,9 +3339,7 @@ function upgradeTick(dt) {
     b.group = buildMesh(into, b.x, b.z);
     b.group.position.set(b.x, 0, b.z);
     b.group.rotation.y += b.rot || 0;
-    b._flags = []; b._chims = []; b._sway = [];
-    b.group.traverse(o => { o.userData.b = b; if (o.userData.isFlag) b._flags.push(o); if (o.userData.isBlades) b._blades = o;
-      if (o.userData.isChimney) b._chims.push(o); if (o.userData.isCloth) b._sway.push(o); });
+    wireGroup(b, b.group);
     scene.add(b.group);
     b.buildT = 0;
     b.upT = 0;
@@ -3751,6 +3909,7 @@ function villagerTick(dt) {
     v.bob += dt*8;
     if (v.cloak) v.cloak.visible = winterNow;
     v._chatCd = Math.max(0, (v._chatCd || 0) - dt);
+    if (v.cheer) v.cheer = Math.max(0, v.cheer - dt);
     if (v.chat > 0) {
       v.chat -= dt;
       if (v.chatMate) v.grp.rotation.y = Math.atan2(v.chatMate.x - v.x, v.chatMate.z - v.z);
@@ -3759,21 +3918,30 @@ function villagerTick(dt) {
     }
     if (v.wait > 0) { v.wait -= dt; continue; }
     if (!v.path) {
-      // pick an errand: fields, market, the keep — routed through gates
+      // pick an errand: fields, market, the keep — routed through gates.
+      // The town keeps hours: lamps out after dark, save the tavern few.
+      const dayF = ((state.time / (DAY*3)) + 0.30) % 1;
+      const nightNow = dayF > 0.80 || dayF < 0.05;
       let dest = null;
+      const pick = (type) => {
+        const arr = state.buildings.filter(b => !b.ruined && b.buildT >= 1 && b.type === type);
+        return arr.length ? arr[Math.random()*arr.length|0] : null;
+      };
       if (v.phase === 'out') dest = v.home;
-      else {
+      else if (nightNow) {
+        dest = (v.kind === 'adult' && Math.random() < 0.2) ? (pick('tavern') || v.home) : v.home;
+      } else {
         const r = Math.random();
-        const pick = (type) => {
-          const arr = state.buildings.filter(b => !b.ruined && b.buildT >= 1 && b.type === type);
-          return arr.length ? arr[Math.random()*arr.length|0] : null;
-        };
-        if (v.kind === 'monk') dest = r < 0.7 ? pick('chapel') : state.buildings.find(b => b.type === 'keep');
+        // the town gathers on special days
+        if (state.festivalBias && r < 0.5) dest = state.buildings.find(b => b.type === 'keep');
+        else if (state.holyBias && r < 0.4) dest = pick('chapel');
+        else if (v.kind === 'monk') dest = r < 0.7 ? pick('chapel') : state.buildings.find(b => b.type === 'keep');
         else if (v.kind === 'child') dest = r < 0.3 ? pick('fountain') || pick('garden') : null;
-        else if (r < 0.3) dest = pick('farm');
-        else if (r < 0.45) dest = pick('market');
-        else if (r < 0.55) dest = nightFactor > 0.3 ? pick('tavern') : pick('chapel');
-        else if (r < 0.62) dest = pick('fountain') || pick('tavern');
+        else if (r < 0.25) dest = pick('farm');
+        else if (r < 0.36) dest = pick('quarry') || pick('woodcutter') || pick('sawmill');
+        else if (r < 0.48) dest = pick('market');
+        else if (r < 0.57) dest = nightFactor > 0.3 ? pick('tavern') : pick('chapel');
+        else if (r < 0.64) dest = pick('fountain') || pick('tavern');
         else if (r < 0.7) dest = state.buildings.find(b => b.type === 'keep');
       }
       if (dest) {
@@ -3818,7 +3986,9 @@ function villagerTick(dt) {
       v.pathi++; v.wpT = 0; v.wpBest = undefined;
       if (v.pathi >= v.path.length) {
         v.path = null;
-        v.wait = 2 + Math.random()*4;
+        const dayF2 = ((state.time / (DAY*3)) + 0.30) % 1;
+        // home for the night stays home; day errands turn over quickly
+        v.wait = (dayF2 > 0.80 || dayF2 < 0.05) ? 8 + Math.random()*8 : 2 + Math.random()*4;
         if (v.phase === 'homeward') {
           v.phase = 'idle';
           v.destType = null;
@@ -3836,6 +4006,7 @@ const keys = {};
 addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'Escape') {
+    if (photoMode) { setPhotoMode(false); return; }
     if ($('almanac').style.display !== 'none') { $('almanac').style.display = 'none'; return; }
     if ($('settings').style.display !== 'none') { $('settings').style.display = 'none'; return; }
     if (isWallTool(tool) && wallDraft.length) { wallDraft = []; startAttach = null; redrawWallPreview(); }
@@ -3868,6 +4039,7 @@ addEventListener('keydown', e => {
     const alm = $('almanac');
     alm.style.display === 'flex' ? (alm.style.display = 'none') : openAlmanac();
   }
+  if (e.code === 'KeyP' && state.started) setPhotoMode(!photoMode);
   if (e.code === 'KeyR' && tool && BUILD_DEFS[tool]) ghostRot = (ghostRot + Math.PI/2) % (Math.PI*2);
   if (e.code === 'Space' && state.started && !state.over && $('settings').style.display === 'none') {
     e.preventDefault();
@@ -4133,6 +4305,7 @@ function step(dt) {
     // buildings that have stood six days gather moss
     for (const b of state.buildings)
       if (!b._mossed && !b.ruined && b.buildT >= 1 && state.day - (b.day || 1) >= 6) mossify(b);
+    refreshOccasions(true);
     saveGame();
   }
   // pop and sickness drift between building changes — re-deal jobs and coverage each second
@@ -4200,10 +4373,32 @@ function step(dt) {
       const L = a.grp.userData.limbs;
       if (L) { L.armR.rotation.x = -0.6 + Math.sin(a.bob * 1.4) * 0.8; a._moved = false; }
     }
+    // pick-swings at the quarry, axe-chops at the woodcutter, saw strokes at the mill
+    if (a.path === null && a.phase === 'out' && a.wait > 0 &&
+        (a.destType === 'quarry' || a.destType === 'woodcutter' || a.destType === 'sawmill')) {
+      const L = a.grp.userData.limbs;
+      if (L) {
+        if (a.destType === 'sawmill') L.armR.rotation.x = -0.4 + Math.sin(a.bob * 2.2) * 0.45;
+        else L.armR.rotation.x = -1.0 + Math.abs(Math.sin(a.bob * 1.5)) * 1.2;
+        a._moved = false;
+      }
+      // chips fly on the downstroke
+      if (Math.random() < 0.015)
+        spawnP(a.x + (Math.random()-0.5)*0.6, 0.9, a.z + (Math.random()-0.5)*0.6,
+          { color: a.destType === 'quarry' ? 0x9a968c : 0xa8814e, life:0.5, vy:1.6, grow:0.1, scale:0.22, opacity:0.8 });
+    }
     // talkers talk with their hands
     if (a.chat > 0) {
       const L = a.grp.userData.limbs;
       if (L) { L.armR.rotation.x = -0.3 + Math.sin(a.bob * 0.7) * 0.35; a._moved = false; }
+    }
+    // and the whole town cheers a new charter
+    if (a.cheer > 0) {
+      const L = a.grp.userData.limbs;
+      if (L) {
+        L.armR.rotation.x = Math.PI * 0.85 + Math.sin(a.bob * 1.3) * 0.35;
+        L.armL.rotation.x = Math.PI * 0.85 + Math.sin(a.bob * 1.3 + 1.2) * 0.35;
+      }
     }
     if (a._moved && !a.baseY) {   // sentries walk the parapet, no ground wear
       a._wearT = (a._wearT || 0) - dt;
@@ -4372,6 +4567,9 @@ function frame(dt) {
       b.rotation.y = -a;
     });
   }
+  // the wind comes in gusts — every flag, cloth and vane feels the same breeze
+  const gust = 0.55 + 0.45 * Math.sin(state.time*0.41) * Math.sin(state.time*0.13 + 2.0);
+  const windDir = state.time * 0.02;
   for (const b of state.buildings) {
     if (b.buildT < 1) {
       const e = 1 - Math.pow(1 - b.buildT, 3);
@@ -4384,13 +4582,17 @@ function frame(dt) {
       }
     }
     if (b._flags && !b.ruined) {
-      for (const f of b._flags) f.rotation.x = Math.sin(state.time*2.3 + b.x*0.7) * 0.12;
+      for (const f of b._flags) f.rotation.x = Math.sin(state.time*2.3 + b.x*0.7) * 0.12 * (0.5 + gust);
     }
-    if (b._blades && !b.ruined && b.buildT >= 1) b._blades.rotation.z += dt * 1.1;
+    if (b._blades && !b.ruined && b.buildT >= 1) b._blades.rotation.z += dt * (0.5 + gust) * 1.1;
     // laundry and shop signs swing in the breeze
     if (b._sway && !b.ruined) {
       for (const s2 of b._sway)
-        s2.rotation.x = Math.sin(state.time*1.8 + (s2.userData.sway || 0)) * 0.16 * (state.raining ? 1.8 : 1);
+        s2.rotation.x = Math.sin(state.time*1.8 + (s2.userData.sway || 0)) * 0.16 * (0.5 + gust) * (state.raining ? 1.8 : 1);
+    }
+    // weather vanes swing to the wind
+    if (b._vanes && !b.ruined) {
+      for (const v2 of b._vanes) v2.rotation.y = windDir + Math.sin(state.time*0.9 + b.z*0.3) * 0.3 * gust;
     }
     // hearth smoke curls from lived-in homes (heavier in winter)
     if (b._chims && b._chims.length && !b.ruined && b.buildT >= 1 && !b.onFire && state.pop > 0 && state.started) {
@@ -4616,6 +4818,17 @@ $('importFile').addEventListener('change', e => {
   rd.readAsText(f);
   e.target.value = '';
 });
+// photo mode: hide every scrap of chrome, keep the town
+let photoMode = false;
+function setPhotoMode(on) {
+  photoMode = on;
+  for (const id of ['topbar','palette','log','objectives','minimap','bcard','hint',
+    'newtown','gearbtn','bookbtn','raidarrow','ranktoast','vignette']) {
+    const el = document.getElementById(id);
+    if (el) el.style.visibility = on ? 'hidden' : '';
+  }
+}
+
 function openSettings() {
   $('set-music').value = settings.music;
   $('set-sfx').value = settings.sfx;
@@ -4704,6 +4917,7 @@ const ALM_TERMS = [
   ['Caravans','Merchants arrive by road to buy your surplus. A trade post and a Great Gate both raise the take; Open Gates raises it further but emboldens raiders.'],
   ['Prestige','High walls and flagstone frontage make an address worth more — richer homes pay richer taxes.'],
   ['Rank','The town’s title — Hamlet, Village, Town, City — follows its highest population ever reached, and each rank unlocks new tools. See THE LADDER.'],
+  ['Days of note','Every sixth day the chapel bell rings a holy day and folk walk to prayer. The first day of autumn is the HARVEST FESTIVAL — pennants fly and the town gathers at the Keep. Press P to hide the panels and watch.'],
 ];
 let almTab = 'build';
 function renderAlmanac() {
@@ -4766,6 +4980,7 @@ function startGame(cont, diff = 'standard') {
   if (cont && loadGame()) {
     msg('The town wakes.', 'dim');
     updateObjectives(true);   // seed the charter from restored progress, silently
+    refreshOccasions(false);
     teleStart(true);
   } else {
     newTownSetup(diff);
@@ -4812,7 +5027,7 @@ window.BULWARK = {
   teleReport: () => buildTeleReport(),
   save: (k) => saveGame(k),
   seasonOf,
-  setEdict, refreshJobs, workforce, staffEff, edictOn,
+  setEdict, refreshJobs, workforce, staffEff, edictOn, isFestivalDay, isHolyDay,
   // debug capture: render into a target and read pixels — the canvas back
   // buffer is cleared after present on Windows, so toDataURL comes back blank
   shot: (q) => {

@@ -231,6 +231,17 @@ function runTests() {
   document.getElementById('almClose').click();
   ok('almanac closes', document.getElementById('almanac').style.display === 'none');
 
+  // ---- occasions & photo mode
+  ok('the harvest festival falls on autumn’s first day',
+    B.isFestivalDay(7) && !B.isFestivalDay(8) && !B.isFestivalDay(1));
+  ok('holy days ring every sixth day', B.isHolyDay(6) && B.isHolyDay(12) && !B.isHolyDay(7));
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyP' }));
+  ok('photo mode hides the chrome',
+    document.getElementById('topbar').style.visibility === 'hidden');
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyP' }));
+  ok('photo mode restores the chrome',
+    document.getElementById('topbar').style.visibility !== 'hidden');
+
   // ---- telemetry
   const rep = B.teleReport();
   ok('telemetry report has all sections', rep.includes('MILESTONES') && rep.includes('RESOURCE CURVE') && rep.includes('TOOL SELECTIONS'));

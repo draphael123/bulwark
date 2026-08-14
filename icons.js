@@ -180,6 +180,12 @@ export const ICON = {
     <path d="M10 52 V26 H54 V52 Z M8 26 L32 12 L56 26"/>
     <path d="M16 52 V34 H24 V52 M40 52 V34 H48 V52 M28 40 H36 V52 H28 Z" stroke-width="1.7"/>
     <path d="M32 12 V6 M32 6 H42 L37 9 L42 12 H32" stroke-width="1.8"/></g>`,
+  promenade: `<g ${S(2.2)}>
+    <path d="M10 44 H54 M10 52 H54 M14 44 V52 M28 44 V52 M42 44 V52 M52 44 V52"/>
+    <path d="M14 44 V36 M28 44 V36 M42 44 V36 M52 44 V36 M10 36 H54" stroke-width="1.8"/>
+    <path d="M20 36 V26 M20 24 h0.1" stroke-width="1.8"/>
+    <circle cx="20" cy="24" r="2.4" stroke-width="1.6"/>
+    <path d="M36 36 V32 M32 32 H40 L38 26 H34 Z" stroke-width="1.6"/></g>`,
   bridge: `<g ${S(2.4)}>
     <path d="M8 40 Q32 20 56 40"/>
     <path d="M8 46 Q32 26 56 46"/>

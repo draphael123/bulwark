@@ -63,7 +63,7 @@ const BUILD_DEFS = {
 };
 // the palette is tabbed by trade; digits pick within the open tab
 const TABS = [
-  { id:'wallTab',  nm:'WALLS',  tools:['palisade','wall','highwall','woodgate','gate','greatgate'] },
+  { id:'wallTab',  nm:'WALLS',  tools:['palisade','wall','highwall','woodgate','gate','greatgate','promenade'] },
   { id:'roadTab',  nm:'ROADS',  tools:['dirtroad','road','flagroad','bridge'] },
   { id:'townTab',  nm:'TOWN',   tools:['hovel','house','longhouse','rowhouse','townhouse','well','granary','greatstore','market'] },
   { id:'civicTab', nm:'CIVIC',  tools:['tavern','chapel','infirmary','bathhouse','school','townhall'] },
@@ -101,14 +101,14 @@ const isGateTool = t => !!GATE_TIERS[t];
 const isRoadTool = t => !!ROAD_TIERS[t];
 const TOOL_NAME = t => (BUILD_DEFS[t] && BUILD_DEFS[t].nm) || (WALL_TIERS[t] && WALL_TIERS[t].nm)
   || (GATE_TIERS[t] && GATE_TIERS[t].nm) || (ROAD_TIERS[t] && ROAD_TIERS[t].nm)
-  || (t === 'hoardings' ? 'Hoardings' : t === 'paint' ? 'Paint' : t === 'bridge' ? 'Bridge' : t);
+  || (t === 'hoardings' ? 'Hoardings' : t === 'paint' ? 'Paint' : t === 'bridge' ? 'Bridge' : t === 'promenade' ? 'Promenade' : t);
 const GATE_COST = 10; // stone, for the Gate tool
 
 // ---------------------------------------------------------------- state
 const RANKS = [
   { pop: 0,  nm: 'Hamlet',  unlocks: ['palisade','wall','woodgate','dirtroad','road','hovel','house','farm','woodcutter','demolish','woodpile','signpost','paint','fence','planttree','bridge'] },
   { pop: 12, nm: 'Village', unlocks: ['gate','well','granary','quarry','mill','sawmill','tavern','watchpost','stakes','orchard','beacon','longhouse','cart','lamppost','maypole','shrine','stall','beehives','graveyard','fisher'] },
-  { pop: 20, nm: 'Town',    unlocks: ['highwall','flagroad','market','chapel','tower','tradepost','fountain','garden','hoardings','moat','infirmary','bathhouse','school','rowhouse','townhouse'] },
+  { pop: 20, nm: 'Town',    unlocks: ['highwall','flagroad','market','chapel','tower','tradepost','fountain','garden','hoardings','moat','infirmary','bathhouse','school','rowhouse','townhouse','promenade'] },
   { pop: 32, nm: 'City',    unlocks: ['greatgate','greatstore','barracks','statue','bannerpole','ballista','townhall'] },
 ];
 
@@ -530,7 +530,7 @@ function placeBridgeAt(x, z, free = false) {
   scene.add(br.grp);
   state.bridges.push(br);
   rebuildRiverPaths();
-  if (!free) { AudioSys.play('thunk'); msg('A bridge spans the water.', 'good'); teleEv('bridge'); saveGame(); }
+  if (!free) { AudioSys.play('thunk'); msg('A bridge spans the water.', 'good'); chron('A bridge was thrown across the river.'); teleEv('bridge'); saveGame(); }
   return br;
 }
 
@@ -585,6 +585,7 @@ scene.add(townMesh);
 const tU = v => (v + WEAR_EXTENT) / (WEAR_EXTENT*2) * 512;
 const tR = v => v / (WEAR_EXTENT*2) * 512;
 function redrawTownGround() {
+  updateWardLabels();   // ward nameplates track building/wall changes too
   const g = townCtx;
   g.clearRect(0, 0, 512, 512);
   // ward interiors trample down; nested wards more so
@@ -2955,6 +2956,11 @@ function gateTick(dt) {
       if (!want) for (const gd of state.guards) if (Math.hypot(gd.x-p.x, gd.z-p.z) < 5) { want = true; break; }
       if (!want) for (const cv of state.caravans) if (Math.hypot(cv.x-p.x, cv.z-p.z) < 6) { want = true; break; }
       if (g.breach) continue;   // a breach has no door to work
+      if (w.promenade) {        // promenade arches stand open forever
+        g.openT = 1;
+        if (g._door) g._door.position.y = -(g._doorH || 4);
+        continue;
+      }
       const prev = g.openT || 0;
       const target = want ? 1 : 0;
       const spd = GATE_TIERS[g.tier || 'gate'].openSpd;
@@ -3015,9 +3021,9 @@ function wallPointAt(w, s) {
 
 // gates: [{seg, t}] — gate carved into segment `seg` at param t along it.
 // Walls are built solid; gates exist only where the player cuts them (Gate tool).
-function buildWallMeshes(verts, closed=true, gates=null, tierKey='wall', hoardings=false) {
+function buildWallMeshes(verts, closed=true, gates=null, tierKey='wall', hoardings=false, promenade=false) {
   const tier = WALL_TIERS[tierKey] || WALL_TIERS.wall;
-  const WH = tier.h;
+  const WH = tier.h * (promenade ? 0.55 : 1);
   const pal = tierKey === 'palisade';
   const spanMat = pal ? MAT.timber : MAT.stone;
   const postMat = pal ? MAT.timber : MAT.stoneD;
@@ -3059,20 +3065,48 @@ function buildWallMeshes(verts, closed=true, gates=null, tierKey='wall', hoardin
         for (let k=0;k<uv.count;k++) uv.setXY(k, uv.getX(k) * Math.max(1, w2/4), uv.getY(k) * (WH/4));
       }
       w.rotation.y = ang; group.add(w);
-      const cnt = Math.floor(w2/2.2);
-      for (let k=0;k<cnt;k++){
-        const q = along(s0 + (k+0.5)*w2/cnt);
-        (pal ? spikeMats : merlonMats).push({ x:q.x, z:q.z, ang });
-      }
-      if (tierKey === 'highwall') {
-        // gold string-course band near the top
-        const trim = box(WALL_T+0.15, 0.3, w2, MAT.rankBanner, p.x, WH-1.2, p.z);
-        trim.rotation.y = ang; group.add(trim);
-      }
-      if (hoardings) {
-        // timber fighting gallery hung out over the wall face
-        const rail = box(WALL_T+1.4, 0.5, w2, MAT.timber, p.x, WH+0.9, p.z);
-        rail.rotation.y = ang; group.add(rail);
+      if (promenade) {
+        // the old wall reborn as a raised walk: deck, rails, lanterns, planters
+        const deck = box(WALL_T + 1.0, 0.16, w2 + 0.2, MAT.timber, p.x, WH + 0.08, p.z);
+        deck.rotation.y = ang; group.add(deck);
+        for (const s of [-1, 1]) {
+          const rail = box(0.08, 0.55, w2, MAT.timber, 0, WH + 0.45, 0);
+          rail.position.set(p.x + Math.cos(ang) * s * (WALL_T/2 + 0.42), WH + 0.45, p.z - Math.sin(ang) * s * (WALL_T/2 + 0.42));
+          rail.rotation.y = ang; group.add(rail);
+        }
+        const nDress = Math.floor(w2 / 6);
+        for (let k = 0; k < nDress; k++) {
+          const q = along(s0 + (k + 0.5) * w2 / nDress);
+          if (k % 2 === 0) {
+            group.add(cyl(0.05, 0.06, 1.1, MAT.ruin, q.x, WH + 0.7, q.z, 4));
+            group.add(box(0.2, 0.26, 0.2, MAT.timber, q.x, WH + 1.3, q.z));
+            const lam = new THREE.Sprite(MAT.windowGlow);
+            lam.scale.setScalar(1.8);
+            lam.position.set(q.x, WH + 1.3, q.z);
+            group.add(lam);
+          } else {
+            group.add(box(0.5, 0.3, 0.5, MAT.timber, q.x, WH + 0.3, q.z));
+            const shrub = new THREE.Mesh(new THREE.IcosahedronGeometry(0.32, 0), PLANT_LEAF_M);
+            shrub.position.set(q.x, WH + 0.62, q.z);
+            group.add(shrub);
+          }
+        }
+      } else {
+        const cnt = Math.floor(w2/2.2);
+        for (let k=0;k<cnt;k++){
+          const q = along(s0 + (k+0.5)*w2/cnt);
+          (pal ? spikeMats : merlonMats).push({ x:q.x, z:q.z, ang });
+        }
+        if (tierKey === 'highwall') {
+          // gold string-course band near the top
+          const trim = box(WALL_T+0.15, 0.3, w2, MAT.rankBanner, p.x, WH-1.2, p.z);
+          trim.rotation.y = ang; group.add(trim);
+        }
+        if (hoardings) {
+          // timber fighting gallery hung out over the wall face
+          const rail = box(WALL_T+1.4, 0.5, w2, MAT.timber, p.x, WH+0.9, p.z);
+          rail.rotation.y = ang; group.add(rail);
+        }
       }
     }
     // gatehouses, doors and levers — breaches render as charred stumps instead
@@ -3177,14 +3211,41 @@ function buildWallMeshes(verts, closed=true, gates=null, tierKey='wall', hoardin
   };
   topper(merlonMats, new THREE.BoxGeometry(WALL_T+0.2, 0.9, 0.9), MAT.stoneD, WH+0.45);
   topper(spikeMats, new THREE.ConeGeometry(0.42, 1.1, 5), MAT.timber, WH+0.5);
-  return { group, gates, blockers, gatePts };
+  return { group, gates, blockers: promenade ? [] : blockers, gatePts };
+}
+// an inner wall the town has outgrown can be reborn as a promenade
+function promenadeEligible(w) {
+  if (w.promenade || w.breached || !w.poly || w.poly.length < 3) return false;
+  // the wall itself — every vertex of it — must stand inside ANOTHER ward:
+  // an outer wall never qualifies just because something was built within it
+  return w.path.every(p =>
+    state.walls.some(o => o !== w && !o.breached && !o.promenade && o.poly && o.poly.length >= 3
+      && pointInPoly(p.x, p.z, o.poly)));
+}
+function convertToPromenade(w) {
+  if (!promenadeEligible(w)) {
+    msg(w.promenade ? 'That is already a promenade.' : 'Only an intact wall standing INSIDE another ward can become a promenade.', 'warn');
+    return false;
+  }
+  if (state.gold < 20) { msg('Turning a wall into a promenade costs 20 gold (lanterns and planting).', 'warn'); return false; }
+  state.gold -= 20;
+  w.promenade = true;
+  rebuildWall(w);
+  refreshDepths();
+  refreshCoverage();
+  msg(`The old ${w.wardName ? w.wardName + ' ' : ''}wall is reborn as a promenade — the town keeps its bones.`, 'good');
+  chron(`The old wall of ${w.wardName || 'the ward'} became a promenade.`);
+  AudioSys.play('fanfare');
+  teleEv('promenade');
+  saveGame();
+  return true;
 }
 
 // rebuild one wall's meshes in place (after adding a gate)
 function rebuildWall(w) {
   scene.remove(w.group);
   disposeGroup(w.group);
-  const r = buildWallMeshes(w.path, w.closed, w.gates, w.tier || 'wall', !!w.hoardings);
+  const r = buildWallMeshes(w.path, w.closed, w.gates, w.tier || 'wall', !!w.hoardings, !!w.promenade);
   w.group = r.group;
   w.blockers = r.blockers;
   w.gatePts = r.gatePts;
@@ -3400,7 +3461,9 @@ function completeConnector(endAttach) {
   state[tier.res] -= cost;
   const { group, gates, blockers, gatePts } = buildWallMeshes(D, false, null, tierKey);
   scene.add(group);
-  state.walls.push({ poly, path:D, closed:false, tier:tierKey, group, gates, blockers, gatePts });
+  const joined = { poly, path:D, closed:false, tier:tierKey, group, gates, blockers, gatePts };
+  state.walls.push(joined);
+  nameWard(joined);
   state.villagers.forEach(v => { v.path = null; });
   refreshDepths();
   const inside = state.buildings.filter(b => b.depth > 0 && !b.ruined).length;
@@ -3449,7 +3512,7 @@ function breachWall(w, nearX, nearZ) {
   refreshDepths();
   refreshCoverage();
   teleEv('palisade_breach');
-  msg('🔥 The palisade burns through — the ward lies OPEN until it is repaired (wall tool).', 'warn');
+  msg('🔥 The wall is BREACHED — the ward lies open until it is repaired (wall tool).', 'warn');
   AudioSys.play('bell');
 }
 function raiseHoardings(w) {
@@ -3485,6 +3548,8 @@ function removeWall(w, refundFrac = 0.25) {
   const tear = (x) => {
     scene.remove(x.group); disposeGroup(x.group);
     (x.sentries || []).forEach(st => { scene.remove(st.grp); disposeGroup(st.grp); });
+    if (x._label) { scene.remove(x._label); x._label.material.map.dispose(); x._label.material.dispose(); }
+    if (x.wardName) chron(`The ward of ${x.wardName} was unmade, its walls torn down.`);
     state.walls.splice(state.walls.indexOf(x), 1);
     state.stone += Math.floor(wallStoneValue(x) * refundFrac);
   };
@@ -3609,7 +3674,9 @@ function tryCloseWall() {
   const verts = wallDraft.map(v => ({x:v.x, z:v.z}));
   const { group, gates, blockers, gatePts } = buildWallMeshes(verts, true, null, tierKey);
   scene.add(group);
-  state.walls.push({ poly: verts, path: verts, closed: true, tier: tierKey, group, gates, blockers, gatePts });
+  const newRing = { poly: verts, path: verts, closed: true, tier: tierKey, group, gates, blockers, gatePts };
+  state.walls.push(newRing);
+  nameWard(newRing);
   state.villagers.forEach(v => { v.path = null; });
   AudioSys.play('stone');
   if (state.walls.length === 1 && state.raidNum === 0 && DIFF[state.difficulty].raid > 0) {
@@ -3797,6 +3864,7 @@ function updateObjectives(silent=false) {
 const TOOL_HINTS = {
   paint: 'Click any finished building to paint its roof. Keep clicking to cycle the dyes; the last click strips it bare again.',
   bridge: 'Click the river to throw a bridge across it. Folk, carts — and raiders — cross only at bridges and fords.',
+  promenade: 'Click a wall your town has outgrown — one standing inside a newer ring. It becomes a raised walk with lanterns, its gates stand open, and homes along it gain prestige.',
   fisher: 'Must stand by water — the river, the lake, or a dug moat. Watered farms nearby also grow ×1.25.',
   wall: 'Click corners on the ground; click your first post (or press Enter) to close the ring. Start on an existing wall to join it.',
   gate: 'Click anywhere on a wall to cut a gate through it.',
@@ -3815,6 +3883,7 @@ function toolCostStr(t) {
   if (t === 'hoardings') return `${resSVG('wood', 11)}${HOARDING_COST}/wall`;
   if (t === 'paint') return `${resSVG('gold', 11)}3/coat`;
   if (t === 'bridge') return `${resSVG('wood', 11)}${BRIDGE_COST}`;
+  if (t === 'promenade') return `${resSVG('gold', 11)}20`;
   if (t === 'demolish') return 'refund ½';
   return costStr(BUILD_DEFS[t].cost);
 }
@@ -3825,6 +3894,7 @@ function canAffordTool(t) {
   if (t === 'hoardings') return state.wood >= HOARDING_COST;
   if (t === 'paint') return state.gold >= 3;
   if (t === 'bridge') return state.wood >= BRIDGE_COST;
+  if (t === 'promenade') return state.gold >= 20;
   if (BUILD_DEFS[t]) return canAfford(BUILD_DEFS[t].cost);
   return true;
 }
@@ -3875,11 +3945,12 @@ function buildingInfoHTML(b) {
   if (!b.ruined && def.popCap) {
     const occ = Math.round(def.popCap * Math.min(1, state.pop / Math.max(1, popCap())));
     let rate = b.depth >= 1 ? 2 * (1 + 0.25 * (b.depth - 1)) : 0.8;
-    for (const [flag, m] of [['_mkt',1.3],['_well',1.15],['_tav',1.1],['_chap',1.08],['_fnt',1.05],['_road',1.05],['_high',1.15]])
+    for (const [flag, m] of [['_mkt',1.3],['_well',1.15],['_tav',1.1],['_chap',1.08],['_fnt',1.05],['_road',1.05],['_high',1.15],['_prom',1.1]])
       if (b[flag]) rate *= m;
-    html += `\n<span class="${b.depth ? 'safe' : 'unsafe'}">${b.depth ? `🛡 Ward ${['','I','II','III','IV','V'][Math.min(b.depth,5)]}` : '⚠ Outside walls'}</span> · ${occ} folk · ${(occ*rate).toFixed(1)} gold/day`;
+    const wOf = b.depth ? wardOf(b.x, b.z) : null;
+    html += `\n<span class="${b.depth ? 'safe' : 'unsafe'}">${b.depth ? `🛡 ${wOf && wOf.wardName ? wOf.wardName.toUpperCase() : 'Ward'} ${['','I','II','III','IV','V'][Math.min(b.depth,5)]}` : '⚠ Outside walls'}</span> · ${occ} folk · ${(occ*rate).toFixed(1)} gold/day`;
     const marks = [
-      ['_well','well'],['_mkt','market'],['_tav','tavern'],['_chap','chapel'],['_fnt','fountain'],['_road','street'],['_high','high wall'],
+      ['_well','well'],['_mkt','market'],['_tav','tavern'],['_chap','chapel'],['_fnt','fountain'],['_road','street'],['_high','high wall'],['_prom','promenade'],
     ].filter(([f]) => b[f]).map(([,n]) => n);
     html += `\n<span class="safe">${marks.length ? '+ ' + marks.join(' · ') : ''}</span>`;
     if (b.type === 'house' && b._well && b._mkt && b.depth >= 1) html += `\n<span class="safe">↑ will grow into a townhouse</span>`;
@@ -4056,6 +4127,19 @@ function refreshCoverage() {
       if (w.tier === 'highwall' && !w.breached && pointInPoly(b.x, b.z, w.poly)) { b._high = true; break; }
     }
     b._road = nearFlagRoad(b.x, b.z);
+    // homes along a promenade take the air there
+    b._prom = false;
+    if (BUILD_DEFS[b.type].popCap) {
+      for (const w of state.walls) {
+        if (!w.promenade) continue;
+        const n2 = w.path.length, segs2 = w.closed ? n2 : n2 - 1;
+        for (let i2 = 0; i2 < segs2; i2++) {
+          const a2 = w.path[i2], c2 = w.path[(i2+1) % n2];
+          if (distToSeg(b.x, b.z, a2.x, a2.z, c2.x, c2.z) < 8) { b._prom = true; break; }
+        }
+        if (b._prom) break;
+      }
+    }
   }
 }
 
@@ -4111,6 +4195,99 @@ function sicknessDaily() {
   if (fresh > 2) msg(`Winter fever — ${fresh} folk take to their beds${staffed('infirmary') ? ', the infirmary tends them' : ''}.`, 'warn');
 }
 
+// ---------------------------------------------------------------- the chronicle
+// the town's history, written as it happens — shown in the Almanac and
+// printed onto the chronicle page
+function chron(text) {
+  if (!state.chronicle) state.chronicle = [];
+  state.chronicle.push({ day: state.day, text });
+  if (state.chronicle.length > 80) state.chronicle.shift();
+}
+
+// ---------------------------------------------------------------- ward names
+// every enclosed ward earns a name, and a character from what stands in it
+const WARD_A = ['Fish', 'Corn', 'Salt', 'Old', 'Well', 'Kirk', 'Mill', 'High', 'Tanners', 'Wool', 'Iron', 'Ash', 'Bell', 'Rose', 'Stone', 'Cart', 'Elm', 'Crow'];
+const WARD_B = ['gate', 'hill', 'row', 'way', 'side', 'mark', 'walk', 'yard', 'cross', 'green'];
+function nameWard(w) {
+  if (!w.poly || w.poly.length < 3 || w.wardName) return;
+  const used = new Set(state.walls.map(x => x.wardName).filter(Boolean));
+  let x = (hashStr((state.townName || 't') + state.walls.length) ^ ((w.poly[0].x * 13 + w.poly[0].z * 7) | 0)) || 5;
+  const rnd = () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; };
+  let nm = '';
+  for (let t = 0; t < 40; t++) {
+    nm = WARD_A[(rnd() * WARD_A.length) | 0] + WARD_B[(rnd() * WARD_B.length) | 0];
+    if (!used.has(nm)) break;
+  }
+  w.wardName = nm;
+  msg(`The folk take to calling the new ward ${nm.toUpperCase()}.`, 'good');
+  chron(`The ward of ${nm} was enclosed.`);
+}
+function wardCharacter(w) {
+  const has = t => state.buildings.filter(b => !b.ruined && b.type === t && pointInPoly(b.x, b.z, w.poly)).length;
+  if (has('chapel') * 2 + has('shrine') + has('graveyard') >= 2) return 'temple ward';
+  if (has('market') * 2 + has('stall') + has('tavern') >= 3) return 'market ward';
+  if (has('garden') + has('orchard') + has('planttree') >= 3) return 'garden ward';
+  if (has('manor') * 2 + has('townhouse') >= 3) return 'high ward';
+  if (has('house') + has('hovel') + has('townhouse') + has('longhouse') + has('rowhouse') >= 4) return 'commons';
+  return '';
+}
+// floating parchment nameplates over each ward
+function makeWardLabelTexture(name, character) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(217,201,168,0.92)';
+  const w2 = 480, h2 = character ? 108 : 78, x0 = (512-w2)/2, y0 = (128-h2)/2;
+  g.fillRect(x0, y0, w2, h2);
+  g.strokeStyle = '#2a1f12'; g.lineWidth = 5;
+  g.strokeRect(x0+5, y0+5, w2-10, h2-10);
+  g.fillStyle = '#2a1f12';
+  g.font = 'bold 44px Georgia, serif';
+  g.textAlign = 'center';
+  g.fillText(name.toUpperCase(), 256, character ? 62 : 76);
+  if (character) {
+    g.font = 'italic 28px Georgia, serif';
+    g.fillStyle = '#6b5427';
+    g.fillText(character, 256, 100);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function updateWardLabels() {
+  for (const w of state.walls) {
+    if (!w.wardName) continue;
+    const ch = wardCharacter(w);
+    const key = w.wardName + '|' + ch;
+    if (w._labelKey === key && w._label) continue;
+    if (w._label) { scene.remove(w._label); w._label.material.map.dispose(); w._label.material.dispose(); }
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: makeWardLabelTexture(w.wardName, ch), transparent: true, depthWrite: false }));
+    let cx = 0, cz = 0;
+    for (const p of w.poly) { cx += p.x; cz += p.z; }
+    cx /= w.poly.length; cz /= w.poly.length;
+    // pull the plate toward the ward's first corner so nested rings
+    // don't stack their names on the same spot
+    cx += (w.poly[0].x - cx) * 0.45;
+    cz += (w.poly[0].z - cz) * 0.45;
+    spr.position.set(cx, 10.5, cz);
+    spr.scale.set(13, 3.25, 1);
+    scene.add(spr);
+    w._label = spr;
+    w._labelKey = key;
+  }
+}
+function wardOf(x, z) {
+  let best = null, bestArea = Infinity;
+  for (const w of state.walls) {
+    if (w.breached || !w.wardName) continue;
+    if (!pointInPoly(x, z, w.poly)) continue;
+    const a = Math.abs(shoelace(w.poly));
+    if (a < bestArea) { bestArea = a; best = w; }
+  }
+  return best;
+}
+
 // ---------------------------------------------------------------- occasions
 // special days derive from the calendar — nothing extra to save
 function isFestivalDay(day) { return seasonOf(day).nm === 'Autumn' && ((day - 1) % 3) === 0; }
@@ -4144,6 +4321,7 @@ function refreshOccasions(announce) {
     scene.add(festGroup);
     if (announce) {
       msg('Harvest festival! The town gathers at the Keep.', 'good');
+      chron('The harvest festival filled the keep yard with song.');
       AudioSys.play('fanfare');
       teleEv('festival');
     }
@@ -4281,6 +4459,7 @@ function rankTick() {
     makeCrest();   // the arms fly on new cloth
     const r = RANKS[idx];
     teleEv('rank_up', r.nm);
+    chron(`${state.townName || 'The town'} rose to the rank of ${r.nm}.`);
     const names = r.unlocks.map(t => BUILD_DEFS[t] ? BUILD_DEFS[t].nm : t).join(', ');
     msg(`The settlement is now a ${r.nm.toUpperCase()}! Unlocked: ${names}.`, 'good');
     // ceremony
@@ -4572,6 +4751,7 @@ function economyTick(dt) {
       if (b._fnt) rate *= 1.05;
       if (b._road) rate *= 1.05;
       if (b._high) rate *= 1.15;
+      if (b._prom) rate *= 1.1;   // an address on the promenade
       tax += occupants * rate;
       if (b.depth >= 1) housesInside.push(b);
     }
@@ -4645,13 +4825,40 @@ function spawnRaid() {
       target:null, state:'seek', loiter:0, grp, bob:Math.random()*6,
     });
   }
+  // a seasoned warband besieges walls instead of jeering at them
+  state.siegeRaid = state.raidNum >= 6 && size >= 6;
+  state.siegePt = null;
   const notes = [];
   if (roster.brute) notes.push(`${roster.brute} brute${roster.brute>1?'s':''}`);
   if (roster.torch) notes.push(`${roster.torch} torch-bearer${roster.torch>1?'s':''}`);
   msg(`${size} raiders ride in from the ${e.name.toLowerCase()}${notes.length ? ' — with ' + notes.join(' and ') : ''}!`, 'warn');
+  if (state.siegeRaid) msg('This is a WARBAND — they carry a ram, and they will find your unwatched walls.', 'warn');
   teleEv('raid', size);
   AudioSys.play('horn');
   scheduleRaid();
+}
+
+// adaptive sieges: a warband studies YOUR walls and makes for the span no
+// tower watches. Highwalls are proof against rams; hoardings deter them.
+function pickSiegeSpan() {
+  let cx = 0, cz = 0, n = 0;
+  for (const bd of state.bandits) { cx += bd.x; cz += bd.z; n++; }
+  if (!n) return null;
+  cx /= n; cz /= n;
+  let best = null, bdd = Infinity;
+  for (const w of state.walls) {
+    if (w.promenade || w.breached || w.tier === 'highwall' || w.hoardings) continue;
+    for (const s of (w.blockers || [])) {
+      const mx = (s.ax + s.bx) / 2, mz = (s.az + s.bz) / 2;
+      const guarded = state.buildings.some(b => !b.ruined && b.buildT >= 1 &&
+        (b.type === 'tower' || b.type === 'watchpost' || b.type === 'ballista') &&
+        Math.hypot(b.x - mx, b.z - mz) < 18);
+      if (guarded) continue;
+      const d = Math.hypot(mx - cx, mz - cz);
+      if (d < bdd) { bdd = d; best = { wall: w, x: mx, z: mz, hp: 90, done: false }; }
+    }
+  }
+  return best;
 }
 
 function nearestEdgeExit(x, z) {
@@ -4705,10 +4912,44 @@ function banditTick(bd, dt) {
     if (bd.route.length) return;
     bd.route = null;
   }
+  // battering the chosen span
+  if (bd.state === 'siege') {
+    const sp = state.siegePt;
+    if (!sp || sp.done) { bd.state = 'seek'; bd.target = null; bd._gd = Infinity; return; }
+    const d = Math.hypot(sp.x - bd.x, sp.z - bd.z);
+    if (d > 3.5) { moveToward(bd, sp.x, sp.z, dt); return; }
+    bd._moved = false;
+    sp.hp -= (bd.kind === 'brute' ? 9 : 4) * dt;
+    if (Math.random() < dt * 1.5) dustBurst(sp.x, sp.z, 1.4, 3);
+    if (Math.random() < dt * 0.8) AudioSys.play('thunk');
+    if (sp.hp <= 0 && !sp.done) {
+      sp.done = true;
+      breachWall(sp.wall, sp.x, sp.z);
+      chron(`A warband breached the wall${sp.wall.wardName ? ' of ' + sp.wall.wardName : ''}.`);
+      state.siegePt = null;
+      for (const b2 of state.bandits) if (b2.state === 'siege') { b2.state = 'seek'; b2.target = null; b2._gd = Infinity; }
+    }
+    return;
+  }
   // pick / validate target
   if (!bd.target || bd.target.ruined || bd.target.depth > 0) {
     const t = raidableTargets();
     if (!t.length) {
+      // a warband doesn't jeer — it finds the weak span and brings the ram
+      if (state.siegeRaid) {
+        if (state.siegePt === null || state.siegePt === undefined) {
+          state.siegePt = pickSiegeSpan();
+          if (state.siegePt) {
+            msg(`⚔ The warband sets its ram against the unwatched wall${state.siegePt.wall.wardName ? ' of ' + state.siegePt.wall.wardName.toUpperCase() : ''}!`, 'warn');
+            AudioSys.play('horn');
+            teleEv('siege');
+          } else {
+            state.siegePt = false;   // every span watched — the siege is refused
+            msg('The warband circles your walls and finds no unwatched span. They curse your towers.', 'good');
+          }
+        }
+        if (state.siegePt) { bd.state = 'siege'; return; }
+      }
       // nothing to raid — jeer at the walls, then leave
       if (bd.state !== 'loiterAtWall') {
         bd.state = 'loiterAtWall'; bd.loiter = 5 + Math.random()*3;
@@ -4790,6 +5031,9 @@ function removeBandit(bd) {
   if (!state.bandits.length && !state.over) {
     const rs = state.raidStats || { kills:0, lost:0 };
     msg(`Raid over — ${rs.kills} raider${rs.kills===1?'':'s'} slain${rs.lost ? `, ${rs.lost} building${rs.lost===1?'':'s'} burned` : ', nothing lost'}.`, rs.lost ? 'warn' : 'good');
+    chron(`${state.siegeRaid ? 'A warband' : 'A raid'} was driven off — ${rs.kills} slain, ${rs.lost || 'nothing'} lost.`);
+    state.siegePt = null;
+    state.siegeRaid = false;
     teleEv('raid_end');
   }
 }
@@ -4799,6 +5043,7 @@ function destroyBuilding(b, byBandit=null) {
   cleanupConstruction(b);
   removeFlash(b);
   b.hitFlash = 0;
+  chron(`The ${BUILD_DEFS[b.type].nm.toLowerCase()} ${byBandit ? 'was torn down by raiders' : 'burned to the ground'}.`);
   redrawTownGround();
   teleEv('destroyed', b.type + (byBandit ? ' (raid)' : ''));
   b.burnT = 0; b.smolderT = 25;
@@ -5082,6 +5327,7 @@ addEventListener('keydown', e => {
   if (document.activeElement && document.activeElement.tagName === 'INPUT' && document.activeElement.type === 'text') return;
   keys[e.code] = true;
   if (e.code === 'Escape') {
+    if (walkWall) { exitWalk(); return; }
     if (photoMode) { setPhotoMode(false); return; }
     if ($('almanac').style.display !== 'none') { $('almanac').style.display = 'none'; return; }
     if ($('settings').style.display !== 'none') { $('settings').style.display = 'none'; return; }
@@ -5116,6 +5362,7 @@ addEventListener('keydown', e => {
     alm.style.display === 'flex' ? (alm.style.display = 'none') : openAlmanac();
   }
   if (e.code === K.photo && state.started) setPhotoMode(!photoMode);
+  if (e.code === K.walk && state.started) walkWall ? exitWalk() : enterWalk();
   if (e.code === K.rotate && tool && BUILD_DEFS[tool]) ghostRot = (ghostRot + Math.PI/2) % (Math.PI*2);
   if (e.code === K.pause && state.started && !state.over && $('settings').style.display === 'none') {
     e.preventDefault();
@@ -5235,6 +5482,12 @@ function handleClick() {
     placeBridgeAt(mouseGround.x, mouseGround.z);
     return;
   }
+  if (tool === 'promenade') {
+    const sp = wallSnap(mouseGround.x, mouseGround.z);
+    if (!sp) { msg('Click an old wall that stands INSIDE another ward.', 'dim'); return; }
+    convertToPromenade(sp.wall);
+    return;
+  }
   if (tool === 'demolish') {
     const b = pickBuilding();
     if (b) { demolish(b); saveGame(); return; }
@@ -5302,9 +5555,10 @@ function saveGame(key = 'bulwark-save') {
       sick:state.sick||0, edicts:state.edicts||{},
       buildings: state.buildings.map(b => ({ type:b.type, x:b.x, z:b.z, rot:b.rot||0, hp:b.hp, ruined:b.ruined, day:b.day||1, tint:b.tint||undefined })),
       walls: state.walls.map(w => ({ poly:w.poly, path:w.path, closed:w.closed,
-        tier:w.tier||'wall', breached:!!w.breached, hoardings:!!w.hoardings,
+        tier:w.tier||'wall', breached:!!w.breached, hoardings:!!w.hoardings, wardName:w.wardName||'', promenade:!!w.promenade,
         gates: w.gates.map(g => ({ seg:g.seg, t:g.t, tier:g.tier, breach:!!g.breach })) })),
       bridges: state.bridges.map(b => ({ x:b.x, z:b.z, ang:b.ang })),
+      chronicle: state.chronicle || [],
     }));
   } catch (e) {}
 }
@@ -5321,6 +5575,7 @@ function loadGame() {
   state.edicts = s.edicts || {};
   state.tutSkip = !!s.tutSkip;
   state.crestVar = s.crestVar || 0;
+  state.chronicle = s.chronicle || [];
   // region resolves by NAME — seeds are per-town now, not per-region
   scatterWorld(state.seed, REGIONS.find(r => r.nm === state.regionNm) || REGIONS.find(r => r.seed === state.seed) || REGIONS[0]);
   state.roads = (s.roads || []).map(r2 => r2.length === 2 ? [r2[0], r2[1], 'road'] : r2);
@@ -5345,9 +5600,13 @@ function loadGame() {
     const path = w.path || w.verts, poly = w.poly || w.verts;   // legacy saves used {verts}
     const closed = w.closed !== undefined ? w.closed : true;
     const tierKey = WALL_TIERS[w.tier] ? w.tier : 'wall';
-    const { group, gates, blockers, gatePts } = buildWallMeshes(path, closed, w.gates || null, tierKey, !!w.hoardings);
+    const { group, gates, blockers, gatePts } = buildWallMeshes(path, closed, w.gates || null, tierKey, !!w.hoardings, !!w.promenade);
     scene.add(group);
-    state.walls.push({ poly, path, closed, tier: tierKey, breached: !!w.breached, hoardings: !!w.hoardings, group, gates, blockers, gatePts });
+    const rw = { poly, path, closed, tier: tierKey, breached: !!w.breached, hoardings: !!w.hoardings,
+      promenade: !!w.promenade, wardName: w.wardName || '', group, gates, blockers, gatePts };
+    if (rw.promenade) rw.blockers = [];   // promenades bar no one
+    state.walls.push(rw);
+    if (!rw.wardName) nameWard(rw);
   }
   for (const b of (s.bridges || [])) {
     const br = { x:b.x, z:b.z, ang:b.ang, grp: makeBridgeMesh(b) };
@@ -5383,6 +5642,8 @@ function newTownSetup(diff = 'standard') {
   state.regionNm = region.nm;
   pendingSeed = 0; pendingRegion = null;
   makeCrest();
+  state.chronicle = [];
+  chron(`${state.townName} was founded in ${state.regionNm}.`);
   for (const b of state.bridges) { scene.remove(b.grp); disposeGroup(b.grp); }
   state.bridges = [];
   scatterWorld(state.seed, region);
@@ -5504,6 +5765,14 @@ function step(dt) {
         spawnP(a.x + (Math.random()-0.5)*0.6, 0.9, a.z + (Math.random()-0.5)*0.6,
           { color: a.destType === 'quarry' ? 0x9a968c : 0xa8814e, life:0.5, vy:1.6, grow:0.1, scale:0.22, opacity:0.8 });
     }
+    // besiegers swing the ram
+    if (a.state === 'siege' && state.siegePt) {
+      const L = a.grp.userData.limbs;
+      if (L && Math.hypot(state.siegePt.x - a.x, state.siegePt.z - a.z) < 4) {
+        L.armR.rotation.x = -1.1 + Math.abs(Math.sin(a.bob * 1.4)) * 1.3;
+        L.armL.rotation.x = -1.1 + Math.abs(Math.sin(a.bob * 1.4)) * 1.3;
+      }
+    }
     // talkers talk with their hands
     if (a.chat > 0) {
       const L = a.grp.userData.limbs;
@@ -5541,18 +5810,20 @@ function frame(dt) {
     if (Math.hypot(camGlide.x - camTarget.x, camGlide.z - camTarget.z) < 0.5) camGlide = null;
     if (keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD || keys.ArrowUp || keys.ArrowDown || keys.ArrowLeft || keys.ArrowRight) camGlide = null;
   }
-  // WASD pan
-  const pan = camDist * 0.9 * dt;
-  const fx = Math.sin(camYaw), fz = Math.cos(camYaw);
-  if (keys[K.panUp] || keys.ArrowUp)     { camTarget.x -= fx*pan; camTarget.z -= fz*pan; }
-  if (keys[K.panDown] || keys.ArrowDown) { camTarget.x += fx*pan; camTarget.z += fz*pan; }
-  if (keys[K.panLeft] || keys.ArrowLeft) { camTarget.x -= fz*pan; camTarget.z += fx*pan; }
-  if (keys[K.panRight] || keys.ArrowRight) { camTarget.x += fz*pan; camTarget.z -= fx*pan; }
-  if (keys[K.camL]) camYaw += dt*1.6;
-  if (keys[K.camR]) camYaw -= dt*1.6;
-  camTarget.x = Math.max(-MAP, Math.min(MAP, camTarget.x));
-  camTarget.z = Math.max(-MAP, Math.min(MAP, camTarget.z));
-  updateCamera();
+  // the watchman's walk owns the camera when active; otherwise WASD pan
+  if (!walkTick(dt)) {
+    const pan = camDist * 0.9 * dt;
+    const fx = Math.sin(camYaw), fz = Math.cos(camYaw);
+    if (keys[K.panUp] || keys.ArrowUp)     { camTarget.x -= fx*pan; camTarget.z -= fz*pan; }
+    if (keys[K.panDown] || keys.ArrowDown) { camTarget.x += fx*pan; camTarget.z += fz*pan; }
+    if (keys[K.panLeft] || keys.ArrowLeft) { camTarget.x -= fz*pan; camTarget.z += fx*pan; }
+    if (keys[K.panRight] || keys.ArrowRight) { camTarget.x += fz*pan; camTarget.z -= fx*pan; }
+    if (keys[K.camL]) camYaw += dt*1.6;
+    if (keys[K.camR]) camYaw -= dt*1.6;
+    camTarget.x = Math.max(-MAP, Math.min(MAP, camTarget.x));
+    camTarget.z = Math.max(-MAP, Math.min(MAP, camTarget.z));
+    updateCamera();
+  }
 
   // ghost + hint
   ray.setFromCamera(mouse, camera);
@@ -5908,12 +6179,13 @@ setInterval(() => {
 const KEY_DEFAULTS = {
   panUp:'KeyW', panDown:'KeyS', panLeft:'KeyA', panRight:'KeyD',
   camL:'KeyQ', camR:'KeyE', pause:'Space', demolish:'KeyX',
-  rotate:'KeyR', almanac:'KeyB', photo:'KeyP',
+  rotate:'KeyR', almanac:'KeyB', photo:'KeyP', walk:'KeyV',
 };
 const KEY_LABELS = {
   panUp:'Pan up', panDown:'Pan down', panLeft:'Pan left', panRight:'Pan right',
   camL:'Turn camera left', camR:'Turn camera right', pause:'Pause',
   demolish:'Demolish tool', rotate:'Rotate building', almanac:'Almanac', photo:'Photo mode',
+  walk:'Walk the wall',
 };
 const settings = Object.assign({ music:45, sfx:80, amb:60, shadows:true, ink:true },
   JSON.parse(localStorage.getItem('bulwark-settings') || '{}'));
@@ -6004,6 +6276,55 @@ $('importFile').addEventListener('change', e => {
   rd.readAsText(f);
   e.target.value = '';
 });
+// walk your walls: drop to the watchman's view and patrol the ramparts
+let walkWall = null, walkS = 0, walkYawOff = 0;
+function enterWalk() {
+  let best = null, bd = Infinity;
+  for (const w of state.walls) {
+    const n = w.path.length, segs = w.closed ? n : n - 1;
+    for (let i = 0; i < segs; i++) {
+      const a = w.path[i], b2 = w.path[(i+1) % n];
+      const d = distToSeg(camTarget.x, camTarget.z, a.x, a.z, b2.x, b2.z);
+      if (d < bd) { bd = d; best = w; }
+    }
+  }
+  if (!best) { msg('No walls to walk yet — raise a ring first.', 'dim'); return; }
+  walkWall = best;
+  const per = wallPerimeter(best);
+  let bs = 0, bdd = Infinity;
+  for (let s = 0; s < per; s += 2) {
+    const p = wallPointAt(best, s);
+    const d = Math.hypot(p.x - camTarget.x, p.z - camTarget.z);
+    if (d < bdd) { bdd = d; bs = s; }
+  }
+  walkS = bs;
+  walkYawOff = 0;
+  msg('You take the wall walk. Forward and back to patrol, left and right to look about, Esc to descend.', 'dim');
+  teleEv('wallwalk');
+}
+function exitWalk() { walkWall = null; }
+function walkTick(dt) {
+  if (!walkWall) return false;
+  if (!state.walls.includes(walkWall)) { exitWalk(); return false; }
+  const w = walkWall;
+  const per = wallPerimeter(w);
+  const spd = 9;
+  if (keys[K.panUp] || keys.ArrowUp) walkS += spd * dt;
+  if (keys[K.panDown] || keys.ArrowDown) walkS -= spd * dt;
+  if (w.closed) walkS = ((walkS % per) + per) % per;
+  else walkS = Math.max(0.5, Math.min(per - 0.5, walkS));
+  if (keys[K.panLeft] || keys.ArrowLeft) walkYawOff += dt * 1.8;
+  if (keys[K.panRight] || keys.ArrowRight) walkYawOff -= dt * 1.8;
+  const p = wallPointAt(w, walkS);
+  const h = (WALL_TIERS[w.tier || 'wall'].h * (w.promenade ? 0.55 : 1)) + 1.7;
+  const bob = Math.abs(Math.sin(state.time * 6)) * 0.06 * ((keys[K.panUp] || keys[K.panDown] || keys.ArrowUp || keys.ArrowDown) ? 1 : 0);
+  camera.position.set(p.x, h + bob, p.z);
+  const lookA = p.ang + walkYawOff;
+  camera.lookAt(p.x + Math.sin(lookA) * 12, h - 0.8, p.z + Math.cos(lookA) * 12);
+  camTarget.x = p.x; camTarget.z = p.z;   // the chart's eye follows the watchman
+  return true;
+}
+
 // photo mode: hide every scrap of chrome, keep the town
 let photoMode = false;
 function setPhotoMode(on) {
@@ -6213,6 +6534,14 @@ function renderAlmanac() {
     body.innerHTML = html;
   } else if (almTab === 'terms') {
     body.innerHTML = ALM_TERMS.map(([nm, d]) => `<div class="almterm"><b>${nm}</b> — ${d}</div>`).join('');
+  } else if (almTab === 'chronicle') {
+    const entries = state.chronicle || [];
+    body.innerHTML = (entries.length
+      ? entries.map(e => `<div class="almterm"><b>Year ${Math.max(1, Math.ceil(e.day / 12))}, day ${e.day}</b> — ${e.text}</div>`).join('')
+      : '<div class="almterm">The chronicle is blank — the town has no history yet.</div>')
+      + `<div style="text-align:center; margin-top:10px"><button id="chron-print" class="upbtn">📜 PRINT THE CHRONICLE PAGE</button></div>`;
+    const pb = document.getElementById('chron-print');
+    if (pb) pb.onclick = openChroniclePage;
   } else {
     body.innerHTML = RANKS.map((r, i) => `<div class="almrank${i === state.rankIdx ? ' now' : ''}">
       <div class="rnm">${i === state.rankIdx ? '⚜ ' : ''}${r.nm.toUpperCase()}</div>
@@ -6221,6 +6550,67 @@ function renderAlmanac() {
       + `<div style="padding:10px 6px; color:#8a7a58; font-size:12px">Rank follows the most folk the town has ever held — it never falls back.</div>`;
   }
 }
+// the chronicle page: an illustrated broadsheet of the town's whole story,
+// opened in its own window for printing or saving as PDF
+function openChroniclePage() {
+  const win = window.open('', '_blank');
+  if (!win) { msg('The browser blocked the chronicle window — allow pop-ups for this page.', 'warn'); return; }
+  const d = win.document;
+  d.title = `The Chronicle of ${state.townName || 'the Town'}`;
+  const entries = (state.chronicle || []).map(e =>
+    `<div class="e"><b>Year ${Math.max(1, Math.ceil(e.day / 12))}, day ${e.day}</b> — ${e.text}</div>`).join('');
+  const wardList = state.walls.filter(w => w.wardName).map(w => {
+    const ch = wardCharacter(w);
+    return `<span class="ward">${w.wardName.toUpperCase()}${ch ? ` <i>(${ch})</i>` : ''}${w.promenade ? ' <i>· promenade</i>' : ''}</span>`;
+  }).join(' · ');
+  d.body.innerHTML = `
+    <style>
+      body { background:#d9c9a8; color:#2a1f12; font-family:Georgia, 'Times New Roman', serif;
+        max-width:760px; margin:0 auto; padding:34px 40px;
+        background-image:radial-gradient(ellipse at center, #e2d4b2 0%, #d9c9a8 60%, #c9b78f 100%); }
+      h1 { text-align:center; font-size:38px; letter-spacing:8px; margin:8px 0 0; }
+      .rule { border:none; border-top:3px double #2a1f12; margin:12px 0; }
+      .sub { text-align:center; font-style:italic; color:#6b5427; margin:4px 0 14px; }
+      .row { display:flex; justify-content:center; gap:26px; align-items:center; margin:10px 0; }
+      .stats { text-align:center; font-size:15px; letter-spacing:1px; margin:8px 0 14px; }
+      .e { margin:7px 0; font-size:14.5px; line-height:1.5; }
+      .e b { color:#7a3020; }
+      .wards { text-align:center; font-size:13.5px; margin:8px 0 16px; line-height:1.9; }
+      .ward { white-space:nowrap; font-weight:bold; }
+      h2 { font-size:15px; letter-spacing:4px; text-align:center; color:#6b5427; margin:20px 0 6px; }
+      .hint { text-align:center; font-size:12px; color:#8a7a58; margin-top:26px; font-style:italic; }
+      @media print { .hint { display:none; } }
+      canvas { image-rendering:auto; }
+    </style>
+    <div class="row" id="crest-row"></div>
+    <h1>${(state.townName || 'THE TOWN').toUpperCase()}</h1>
+    <div class="sub">of ${state.regionNm} · ${RANKS[state.rankIdx].nm} · founded in the year 1</div>
+    <hr class="rule">
+    <div class="stats">Day ${state.day} · ${Math.floor(state.pop)} folk · ${state.walls.length} wall${state.walls.length===1?'':'s'} · ${state.bridges.length} bridge${state.bridges.length===1?'':'s'} · ${state.raidNum} raid${state.raidNum===1?'':'s'} weathered</div>
+    <div class="row" id="chart-row"></div>
+    ${wardList ? `<h2>THE WARDS</h2><div class="wards">${wardList}</div>` : ''}
+    <h2>THE CHRONICLE</h2>
+    ${entries || '<div class="e">The pages await their first entry.</div>'}
+    <hr class="rule">
+    <div class="hint">Print this page (Ctrl+P) to keep it — or save it as a PDF and fly your arms abroad.</div>`;
+  // copy the crest and the surveyor's chart across — drawn, never read back
+  if (crestCanvas) {
+    const cc = d.createElement('canvas');
+    cc.width = crestCanvas.width; cc.height = crestCanvas.height;
+    cc.style.height = '110px'; cc.style.width = 'auto';
+    cc.getContext('2d').drawImage(crestCanvas, 0, 0);
+    d.getElementById('crest-row').appendChild(cc);
+  }
+  drawMinimap();
+  const mc = d.createElement('canvas');
+  mc.width = mmapEl.width; mc.height = mmapEl.height;
+  mc.style.width = '300px'; mc.style.height = '300px';
+  mc.style.border = '3px solid #2a1f12';
+  mc.getContext('2d').drawImage(mmapEl, 0, 0);
+  d.getElementById('chart-row').appendChild(mc);
+  teleEv('chronicle_page');
+}
+
 function openAlmanac() {
   renderAlmanac();
   $('almanac').style.display = 'flex';
@@ -6322,6 +6712,12 @@ window.BULWARK = {
   setEdict, refreshJobs, workforce, staffEff, edictOn, isFestivalDay, isHolyDay,
   upgrade: (b) => tryUpgrade(b),
   paint: (b) => paintBuilding(b),
+  promenade: (w) => convertToPromenade(w),
+  promenadeOK: (w) => promenadeEligible(w),
+  walkStart: () => enterWalk(),
+  walkStop: () => exitWalk(),
+  walking: () => !!walkWall,
+  siegeSpan: () => pickSiegeSpan(),
   // debug capture: render into a target and read pixels — the canvas back
   // buffer is cleared after present on Windows, so toDataURL comes back blank
   shot: (q) => {

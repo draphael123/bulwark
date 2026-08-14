@@ -234,6 +234,24 @@ function runTests() {
   document.getElementById('almClose').click();
   ok('almanac closes', document.getElementById('almanac').style.display === 'none');
 
+  // ---- ward identity, promenades, the watchman, the chronicle
+  ok('the first ward earned a name', S.walls.some(w => !!w.wardName));
+  S.gold += 120; S.stone += 200;
+  B.wall([[43,43],[53,43],[53,53],[43,53]]);   // a ring within the palisade ring
+  const innerRing = S.walls[S.walls.length - 1];
+  const outerPal = S.walls.find(w => w.tier === 'palisade' && w.closed);
+  ok('a ward within a ward may become a promenade', B.promenadeOK(innerRing) === true);
+  ok('an outermost wall may not', outerPal ? !B.promenadeOK(outerPal) : true);
+  B.promenade(innerRing);
+  ok('the old wall is reborn as a promenade', innerRing.promenade === true && innerRing.blockers.length === 0);
+  B.walkStart();
+  ok('the watchman takes the wall walk', B.walking() === true);
+  B.walkStop();
+  ok('the watchman descends', B.walking() === false);
+  ok('the chronicle remembers the founding', (S.chronicle || []).length >= 3
+    && S.chronicle[0].text.includes('founded'));
+  ok('no warband afoot means no siege plan', B.siegeSpan() === null);
+
   // ---- manual upgrades
   S.wood += 200; S.stone += 200; S.gold += 200;
   const upHovel = B.placeFree('hovel', -70, 30);

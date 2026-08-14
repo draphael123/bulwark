@@ -15,6 +15,7 @@ const BUILD_DEFS = {
   house:      { nm:'House',      ico:'🏠', w:3,  d:3,  hp:60,  cost:{wood:20},            popCap:4, needsWard:true },
   townhouse:  { nm:'Townhouse',  ico:'🏘️', w:3,  d:3,  hp:90,  cost:{},                   popCap:8, needsWard:true },  // upgrade only
   well:       { nm:'Well',       ico:'⛲', w:2,  d:2,  hp:60,  cost:{wood:10, stone:15},  coverR:14, needsWard:true },
+  granary:    { nm:'Granary',    ico:'🧺', w:4,  d:4,  hp:80,  cost:{wood:35, stone:15},  storage:180, needsWard:true },
   farm:       { nm:'Farm',       ico:'🌾', w:6,  d:6,  hp:50,  cost:{wood:30},            foodPerDay:12 },
   woodcutter: { nm:'Woodcutter', ico:'🪵', w:3,  d:3,  hp:50,  cost:{wood:10, gold:10},   woodPerDay:8, needsTrees:2 },
   quarry:     { nm:'Quarry',     ico:'⛏️', w:4,  d:4,  hp:80,  cost:{wood:25, gold:15},   stonePerDay:8, needsRocks:2 },
@@ -24,17 +25,32 @@ const BUILD_DEFS = {
   keep:       { nm:'Keep',       ico:'🏰', w:6,  d:6,  hp:400, cost:{},                   popCap:8 },
 };
 // walls first, then the town: the toolbar teaches the build order.
-// digits 1-9,0 map to the first ten tools; demolish lives on X
-const TOOL_ORDER = ['wall','gate','house','well','farm','woodcutter','quarry','market','tower','barracks','demolish'];
+// digits 1-9,0 map to the first ten tools; barracks lives on B, demolish on X
+const TOOL_ORDER = ['wall','gate','house','well','granary','farm','woodcutter','quarry','market','tower','barracks','demolish'];
 const GATE_COST = 10; // stone, for the Gate tool
 
 // ---------------------------------------------------------------- state
 const RANKS = [
   { pop: 0,  nm: 'Hamlet',  unlocks: ['wall','gate','house','farm','woodcutter','demolish'] },
-  { pop: 12, nm: 'Village', unlocks: ['well','quarry'] },
+  { pop: 12, nm: 'Village', unlocks: ['well','quarry','granary'] },
   { pop: 20, nm: 'Town',    unlocks: ['market','tower'] },
   { pop: 32, nm: 'City',    unlocks: ['barracks'] },
 ];
+
+// the year turns: 3 days a season, 12-day years. Farms follow the sun.
+const SEASONS = [
+  { nm:'Spring', farm:1.0,  ground:0xffffff, leaf:0xffffff },
+  { nm:'Summer', farm:1.2,  ground:0xf8f2da, leaf:0xf0ecd0 },
+  { nm:'Autumn', farm:1.6,  ground:0xd9c090, leaf:0xd9a860 },
+  { nm:'Winter', farm:0.1,  ground:0xbfc8cc, leaf:0xb0bec6 },
+];
+function seasonOf(day) { return SEASONS[Math.floor((day-1)/3) % 4]; }
+const SEASON_MSGS = {
+  Spring: 'Spring — the fields wake.',
+  Summer: 'Summer — long days, good yields.',
+  Autumn: 'Autumn — the harvest swells. Winter is three days away: fill the stores.',
+  Winter: 'Winter — the fields sleep. The town lives on what it has stored.',
+};
 
 const TOWN_PRE = ['Ald','Bre','Cal','Dun','El','Fen','Gild','Hart','Iron','Kes','Lang','Mor','Nor','Oak','Pen','Ravens','Stone','Thorn','Wex','Wyn'];
 const TOWN_SUF = ['mere','ford','holt','wick','stead','bury','dale','march','haven','cross','field','brook','hollow'];
@@ -312,6 +328,7 @@ const REGIONS = [
 ];
 const trees = [], rocks = [];
 let worldMeshes = [];
+const seasonMats = { leaves: [] };   // tinted by the turning year
 function scatterWorld(seed, cfg) {
   cfg = cfg || REGIONS.find(r => r.seed === seed) || REGIONS[0];
   for (const m of worldMeshes) { scene.remove(m); disposeGroup(m); }
@@ -416,6 +433,7 @@ function scatterWorld(seed, cfg) {
     flwI.setColorAt(i, col.setHex(flwCols[(srand()*flwCols.length)|0]));
   }
   addWorld(flwI);
+  seasonMats.leaves = [pineI.material, blobI.material, tuftI.material];
 }
 scatterWorld(REGIONS[0].seed);   // title-screen backdrop
 
@@ -512,6 +530,16 @@ function buildMesh(type, bx = 0, bz = 0) {
     for (const s of [-1, 1]) g.add(box(0.14, 1.5, 0.14, MAT.timber, s*0.8, 0.75, 0));
     const r = new THREE.Mesh(prismGeo(2.0, 0.7, 1.2), MAT.roofB); r.position.y = 1.5; r.castShadow = true; g.add(r);
     g.add(box(0.3, 0.3, 0.3, MAT.timber, 0, 1.0, 0));
+  } else if (type === 'granary') {
+    // raised storehouse on staddle stones — keeps the winter stores dry
+    for (const [sx, sz] of [[-1.2,-0.9],[1.2,-0.9],[-1.2,0.9],[1.2,0.9]])
+      g.add(cyl(0.28, 0.38, 1.0, MAT.stoneD, sx, 0.5, sz, 6));
+    g.add(box(3.2, 1.9, 2.6, MAT.timber, 0, 1.95, 0));
+    const r = new THREE.Mesh(prismGeo(3.6, 1.4, 3.0), [MAT.roof, MAT.roofD, MAT.roofB][(vh*3)|0]);
+    r.position.y = 2.9; r.castShadow = true; g.add(r);
+    g.add(box(0.9, 1.1, 0.08, MAT.plaster, 0, 1.85, 1.34));   // loading door
+    const ladder = box(0.5, 1.3, 0.08, MAT.timber, 0, 0.6, 1.5);
+    ladder.rotation.x = 0.35; g.add(ladder);
   } else if (type === 'farm') {
     g.add(box(5.6, 0.25, 5.6, MAT.soil, 0, 0.12, 0));
     for (let i=0;i<4;i++) g.add(box(5.0, 0.35, 0.7, MAT.crop, 0, 0.4, -2.1+i*1.4));
@@ -636,15 +664,26 @@ let rainPts;
   rainPts.frustumCulled = false;
   scene.add(rainPts);
 }
+const _seasonCol = new THREE.Color();
+function seasonVisualTick(dt) {
+  const s = seasonOf(state.day);
+  const k = Math.min(1, dt * 0.35);
+  ground.material.color.lerp(_seasonCol.setHex(s.ground), k);
+  for (const m of seasonMats.leaves) m.color.lerp(_seasonCol.setHex(s.leaf), k);
+}
 function rainVisualTick(dt) {
   const target = (state.raining ? 1 : 0);
   rainFactor += (target - rainFactor) * Math.min(1, dt * 0.7);
-  rainPts.material.opacity = rainFactor * 0.55;
+  const snow = seasonOf(state.day).nm === 'Winter';
+  rainPts.material.color.setHex(snow ? 0xffffff : 0x9db8d8);
+  rainPts.material.size = snow ? 0.36 : 0.22;
+  rainPts.material.opacity = rainFactor * (snow ? 0.8 : 0.55);
   if (rainFactor < 0.02) return;
   rainPts.position.set(camTarget.x, 0, camTarget.z);
   const p = rainPts.geometry.attributes.position;
+  const fall = snow ? 9 : 55;
   for (let i=0;i<RAIN_N;i++){
-    let y = p.getY(i) - 55 * dt;
+    let y = p.getY(i) - fall * dt;
     if (y < 0) {
       y = 45 + Math.random()*15;
       p.setX(i, (Math.random()-0.5)*130);
@@ -1229,6 +1268,7 @@ function completeConnector(endAttach) {
   state.villagers.forEach(v => { v.path = null; });
   refreshDepths();
   const inside = state.buildings.filter(b => b.depth > 0 && !b.ruined).length;
+  teleEv('wall_join', cost);
   msg(`Walls joined — 🪨${cost}. A new ward is enclosed (${inside} building${inside===1?'':'s'} behind walls).`, 'good');
   const maxDepth = Math.max(...state.buildings.map(b => b.depth), 0);
   if (maxDepth >= 2) msg('An inner ward! Deep wards pay richer taxes.', 'good');
@@ -1276,6 +1316,7 @@ function removeWall(w, refundFrac = 0.25) {
   refreshDepths();
   refreshCoverage();
   state.villagers.forEach(v => { v.path = null; });
+  teleEv('wall_down');
 }
 
 // one gate-tool click at world coords (shared by mouse input and test hooks)
@@ -1291,6 +1332,7 @@ function gateClickAt(wx, wz) {
   state.stone -= GATE_COST;
   w.gates.push({ seg: sp.seg, t: sp.t });
   rebuildWall(w);
+  teleEv('gate_cut');
   msg('Gate cut through the wall.', 'good');
   AudioSys.play('creak');
   saveGame();
@@ -1371,6 +1413,7 @@ function tryCloseWall() {
   }
   refreshDepths();
   const inside = state.buildings.filter(b => b.depth > 0 && !b.ruined).length;
+  teleEv('wall_ring', cost);
   msg(`Ring closed — 🪨${cost}. ${inside} building${inside===1?'':'s'} now behind walls.`, 'good');
   if (state.walls.length === 1) msg('The ring is solid stone — cut a gate with the Gate tool (0) where you want one.', 'dim');
   const maxDepth = Math.max(...state.buildings.map(b => b.depth), 0);
@@ -1397,6 +1440,7 @@ function refreshPaletteLocks() {
 function setTool(t) {
   const lockRank = t && toolLocked(t);
   if (lockRank) { msg(`${BUILD_DEFS[t] ? BUILD_DEFS[t].nm + 's' : 'That'} unlock at ${lockRank.pop} folk (${lockRank.nm}).`, 'warn'); return; }
+  if (t) selectBuilding(null);
   if (tool === 'wall' && t !== 'wall') { wallDraft = []; startAttach = null; redrawWallPreview(); }
   tool = (tool === t) ? null : t;
   if (ghost) { scene.remove(ghost); ghost = null; }
@@ -1407,7 +1451,7 @@ function setTool(t) {
   }
   document.querySelectorAll('.tool').forEach(el => el.classList.toggle('active', el.dataset.t === tool));
   hintEl.style.display = 'none';
-  if (tool) AudioSys.play('click');
+  if (tool) { AudioSys.play('click'); tele.tools[tool] = (tele.tools[tool] || 0) + 1; }
   if (tool && TOOL_HINTS[tool] && !seenHints[tool]) { seenHints[tool] = true; msg(TOOL_HINTS[tool], 'dim'); }
 }
 
@@ -1425,6 +1469,60 @@ function msg(text, cls='') {
   setTimeout(() => d.remove(), 10600);
 }
 
+// ---------------------------------------------------------------- telemetry
+// silent session log -> one-button report, so a human playtest yields data
+const tele = {
+  samples: [], events: [], tools: {}, sampleT: 0, active: false,
+  speedSecs: { paused: 0, 1: 0, 2: 0, 4: 0 },
+};
+function teleStart(resumed) {
+  tele.active = true;
+  teleEv(resumed ? 'session_resume' : 'town_founded', state.townName);
+}
+function teleEv(type, detail) {
+  if (!tele.active) return;
+  tele.events.push({ day: state.day, t: Math.round(state.time), type, detail: detail === undefined ? '' : String(detail) });
+  if (tele.events.length > 800) tele.events.shift();
+}
+function teleSample(dt) {
+  tele.sampleT += dt;
+  if (tele.sampleT < 5) return;
+  tele.sampleT = 0;
+  tele.samples.push({ t: Math.round(state.time), day: state.day,
+    g: Math.floor(state.gold), w: Math.floor(state.wood), s: Math.floor(state.stone),
+    f: Math.floor(state.food), p: Math.floor(state.pop) });
+  if (tele.samples.length > 700) tele.samples.shift();
+}
+function buildTeleReport() {
+  const mins = v => (v/60).toFixed(1) + 'm';
+  const real = Object.values(tele.speedSecs).reduce((a,b) => a+b, 0);
+  let out = 'BULWARK PLAYTEST REPORT\n';
+  out += `${state.townName || 'Unnamed'} in ${state.regionNm || '?'} — ${RANKS[state.rankIdx].nm}, Day ${state.day} (${seasonOf(state.day).nm})\n`;
+  out += `Real time ${mins(real)} — paused ${mins(tele.speedSecs.paused)} · 1x ${mins(tele.speedSecs[1])} · 2x ${mins(tele.speedSecs[2])} · 4x ${mins(tele.speedSecs[4])}\n`;
+  out += `Now: gold ${Math.floor(state.gold)}, wood ${Math.floor(state.wood)}, stone ${Math.floor(state.stone)}, food ${Math.floor(state.food)}/${foodCap()}, pop ${Math.floor(state.pop)}/${popCap()}\n\n`;
+  const mile = tele.events.filter(e => ['town_founded','session_resume','rank_up','charter','game_over'].includes(e.type));
+  out += 'MILESTONES\n' + mile.map(e => `  day ${e.day} (t=${e.t}s): ${e.type} ${e.detail}`).join('\n') + '\n\n';
+  const counts = {};
+  tele.events.forEach(e => { counts[e.type] = (counts[e.type] || 0) + 1; });
+  out += 'EVENTS: ' + Object.entries(counts).map(([k,v]) => `${k}×${v}`).join(', ') + '\n';
+  const tradeGold = tele.events.filter(e => e.type === 'caravan_trade').reduce((s,e) => s + (+e.detail || 0), 0);
+  out += `Caravan gold total: ${tradeGold}\n`;
+  let maxGap = 0, gapAt = 0;
+  for (let i = 1; i < tele.events.length; i++) {
+    const g = tele.events[i].t - tele.events[i-1].t;
+    if (g > maxGap) { maxGap = g; gapAt = tele.events[i-1].t; }
+  }
+  out += `Longest quiet stretch: ${maxGap}s of sim time (after t=${gapAt}s)\n\n`;
+  out += 'RESOURCE CURVE (gold/wood/stone/food/pop)\n';
+  const step = Math.max(1, Math.floor(tele.samples.length / 30));
+  for (let i = 0; i < tele.samples.length; i += step) {
+    const s = tele.samples[i];
+    out += `  d${s.day} t=${s.t}s: ${s.g}/${s.w}/${s.s}/${s.f}/${s.p}\n`;
+  }
+  out += '\nTOOL SELECTIONS: ' + (Object.entries(tele.tools).map(([k,v]) => `${k}×${v}`).join(', ') || 'none') + '\n';
+  return out;
+}
+
 // ---------------------------------------------------------------- founding charter
 const OBJECTIVES = [
   { id:'wall',   label:'Ring the Keep in stone (Wall — 1)',  test:() => state.buildings.some(b => b.type==='keep' && b.depth > 0) },
@@ -1440,7 +1538,7 @@ function updateObjectives(silent=false) {
   let all = true;
   for (const o of OBJECTIVES) {
     if (!objDone[o.id]) {
-      if (o.test()) { objDone[o.id] = true; if (!silent) { msg(`✔ ${o.label}`, 'good'); AudioSys.play('chime'); } }
+      if (o.test()) { objDone[o.id] = true; teleEv('charter', o.id); if (!silent) { msg(`✔ ${o.label}`, 'good'); AudioSys.play('chime'); } }
       else all = false;
     }
   }
@@ -1468,7 +1566,7 @@ function costStr(cost) {
 {
   const TOOL_GROUPS = [
     { nm:'WALLS',    tools:['wall','gate'] },
-    { nm:'TOWN',     tools:['house','well','market'] },
+    { nm:'TOWN',     tools:['house','well','granary','market'] },
     { nm:'INDUSTRY', tools:['farm','woodcutter','quarry'] },
     { nm:'DEFENSE',  tools:['tower','barracks'] },
     { nm:'',         tools:['demolish'] },
@@ -1507,13 +1605,63 @@ function costStr(cost) {
 }
 
 function fmt(n) { return Math.floor(n); }
+
+// shared ledger text for hover tooltips and the selection card
+function buildingInfoHTML(b) {
+  const def = BUILD_DEFS[b.type];
+  let html = `${def.ico} <b>${def.nm}</b>${b.ruined ? ' — ruin (Demolish to clear)' : ''}${b.onFire ? ' — 🔥 ON FIRE' : ''}`;
+  if (!b.ruined && (b.type === 'house' || b.type === 'townhouse' || b.type === 'keep')) {
+    const occ = Math.round(def.popCap * Math.min(1, state.pop / Math.max(1, popCap())));
+    let rate = b.depth >= 1 ? 2 * (1 + 0.25 * (b.depth - 1)) : 0.8;
+    if (b._mkt) rate *= 1.3;
+    if (b._well) rate *= 1.15;
+    html += `\n<span class="${b.depth ? 'safe' : 'unsafe'}">${b.depth ? `🛡 Ward ${['','I','II','III','IV','V'][Math.min(b.depth,5)]}` : '⚠ Outside walls'}</span> · ${occ} folk · 🪙${(occ*rate).toFixed(1)}/day`;
+    html += `\n<span class="${b._well?'safe':'unsafe'}">⛲ ${b._well?'well water':'no well'}</span> · <span class="${b._mkt?'safe':'unsafe'}">🏪 ${b._mkt?'market nearby':'no market'}</span>`;
+    if (b.type === 'house' && b._well && b._mkt && b.depth >= 1) html += `\n<span class="safe">↑ will grow into a townhouse</span>`;
+  }
+  if (!b.ruined && b.type === 'granary') html += `\n+${def.storage} food storage (town total ${foodCap()})`;
+  if (!b.ruined && b.type === 'farm') html += `\n${seasonOf(state.day).nm}: ×${seasonOf(state.day).farm}${state.raining ? ' · rain ×1.25' : ''}`;
+  if (!b.ruined && b.type === 'well') html += `\nwaters houses within ${def.coverR} — and fights fires`;
+  if (!b.ruined && b.hp < b.maxHp - 0.5) html += `\n${Math.round(b.hp)}/${b.maxHp} hp`;
+  return html;
+}
+
+// ---------------------------------------------------------------- selection
+let selB = null;
+const selRing = new THREE.Mesh(
+  new THREE.RingGeometry(1, 1.15, 32),
+  new THREE.MeshBasicMaterial({ color:0xd9a44a, transparent:true, opacity:0.85, side:THREE.DoubleSide, depthWrite:false })
+);
+selRing.rotation.x = -Math.PI/2;
+selRing.position.y = 0.07;
+selRing.visible = false;
+scene.add(selRing);
+function selectBuilding(b) {
+  selB = b;
+  const card = $('bcard');
+  if (!b) { card.style.display = 'none'; selRing.visible = false; return; }
+  selRing.visible = true;
+  selRing.position.x = b.x; selRing.position.z = b.z;
+  selRing.scale.setScalar(Math.max(BUILD_DEFS[b.type].w, BUILD_DEFS[b.type].d)/2 + 1.1);
+  $('bcard-body').innerHTML = buildingInfoHTML(b).replace(/\n/g, '<br>');
+  $('bcard-demolish').style.display = (b.type === 'keep') ? 'none' : '';
+  card.style.display = 'block';
+}
+$('bcard-x').onclick = () => selectBuilding(null);
+$('bcard-demolish').onclick = () => {
+  if (selB && selB.type !== 'keep') {
+    demolish(selB);
+    saveGame();
+    selectBuilding(null);
+  }
+};
 function updateHUD() {
   $('r-gold').textContent = fmt(state.gold);
   $('r-wood').textContent = fmt(state.wood);
   $('r-stone').textContent = fmt(state.stone);
-  $('r-food').textContent = fmt(state.food);
+  $('r-food').textContent = `${fmt(state.food)}∕${foodCap()}`;
   $('r-pop').textContent = `${fmt(state.pop)}/${popCap()}`;
-  $('daycount').textContent = `${state.townName ? state.townName + ' — ' : ''}${RANKS[state.rankIdx].nm} · Day ${state.day}`;
+  $('daycount').textContent = `${state.townName ? state.townName + ' — ' : ''}${RANKS[state.rankIdx].nm} · Day ${state.day} · ${seasonOf(state.day).nm}`;
   const warn = $('raidwarn');
   if (!state.over && state.raidTimer < 15) {
     warn.style.display = 'inline';
@@ -1537,6 +1685,11 @@ function updateHUD() {
 function popCap() {
   let c = 0;
   for (const b of state.buildings) if (!b.ruined && BUILD_DEFS[b.type].popCap) c += BUILD_DEFS[b.type].popCap;
+  return c;
+}
+function foodCap() {
+  let c = 120;
+  for (const b of state.buildings) if (!b.ruined && b.type === 'granary') c += BUILD_DEFS.granary.storage;
   return c;
 }
 function foodRate() { // per day
@@ -1571,9 +1724,17 @@ function rankTick() {
     state.rankIdx = idx;
     MAT.rankBanner.color.setHex(RANK_BANNER_COLORS[idx]);
     const r = RANKS[idx];
+    teleEv('rank_up', r.nm);
     const names = r.unlocks.map(t => BUILD_DEFS[t] ? BUILD_DEFS[t].nm : t).join(', ');
     msg(`The settlement is now a ${r.nm.toUpperCase()}! Unlocked: ${names}.`, 'good');
-    AudioSys.play('chime');
+    // ceremony
+    $('ranktoast-main').textContent = `⚜ ${(state.townName || 'THE TOWN').toUpperCase()} IS NOW A ${r.nm.toUpperCase()} ⚜`;
+    $('ranktoast-sub').textContent = `unlocked: ${names}`;
+    const toast = $('ranktoast');
+    toast.classList.remove('show');
+    void toast.offsetWidth;   // restart the animation
+    toast.classList.add('show');
+    AudioSys.play('fanfare');
     refreshPaletteLocks();
     saveGame();
   }
@@ -1600,6 +1761,7 @@ function upgradeTick(dt) {
       b.buildT = 0;
       dustBurst(b.x, b.z, 2, 10);
       AudioSys.play('thunk');
+      teleEv('townhouse');
       msg('A house grows into a townhouse — twice the folk, twice the rent.', 'good');
       saveGame();
     }
@@ -1616,7 +1778,7 @@ function weatherTick(dt) {
     } else {
       state.raining = true;
       state.weatherT = 45 + Math.random()*50;
-      msg('Rain sweeps over the valley.', 'dim');
+      msg(seasonOf(state.day).nm === 'Winter' ? 'Snow drifts over the valley.' : 'Rain sweeps over the valley.', 'dim');
     }
   }
 }
@@ -1626,6 +1788,7 @@ const FLAMMABLE = { house:1, townhouse:1.6, market:1, woodcutter:1.4, barracks:1
 function igniteBuilding(b) {
   if (b.ruined || b.onFire) return;
   b.onFire = true; b.fireT = 0; b._spread = false;
+  teleEv('fire', b.type);
   msg('🔥 Fire has broken out in the ward!', 'warn');
   AudioSys.play('bell');
 }
@@ -1705,6 +1868,7 @@ function caravanTick(dt) {
       if (c.tradeT <= 0) {
         const take = 10 + markets.length*4 + Math.min(20, Math.floor(state.pop/3));
         state.gold += take;
+        teleEv('caravan_trade', take);
         AudioSys.play('coin');
         if (Math.random() < 0.4) msg(`A caravan trades at the market — 🪙${take}.`, 'good');
         c.phase = 'out';
@@ -1739,7 +1903,7 @@ function economyTick(dt) {
   const housesInside = [];
   for (const b of state.buildings) {
     if (b.ruined) continue;
-    if (b.type === 'farm') state.food += BUILD_DEFS.farm.foodPerDay * (state.raining ? 1.25 : 1) * perDay;
+    if (b.type === 'farm') state.food += BUILD_DEFS.farm.foodPerDay * seasonOf(state.day).farm * (state.raining ? 1.25 : 1) * perDay;
     else if (b.type === 'woodcutter') state.wood += BUILD_DEFS.woodcutter.woodPerDay * perDay;
     else if (b.type === 'quarry') state.stone += BUILD_DEFS.quarry.stonePerDay * perDay;
     else if (b.type === 'house' || b.type === 'townhouse' || b.type === 'keep') {
@@ -1753,6 +1917,16 @@ function economyTick(dt) {
   }
   state.gold += tax * perDay;
   state.food = Math.max(0, state.food - state.pop * 0.5 * perDay);
+  // stores are finite — surplus beyond the granaries spoils
+  const cap = foodCap();
+  if (state.food > cap) {
+    state.food = cap;
+    state._spoilT = (state._spoilT || 0) - dt;
+    if (state._spoilT <= 0) {
+      state._spoilT = 45;
+      msg('The stores are full — surplus grain spoils. Raise a granary before winter.', 'warn');
+    }
+  }
   // growth / starvation
   growthT += dt;
   if (growthT >= 6) {
@@ -1793,6 +1967,7 @@ function spawnRaid() {
     });
   }
   msg(`${size} raiders ride in from the ${e.name.toLowerCase()}!`, 'warn');
+  teleEv('raid', size);
   AudioSys.play('horn');
   scheduleRaid();
 }
@@ -1895,11 +2070,12 @@ function removeBandit(bd) {
   disposeGroup(bd.grp);
   const i = state.bandits.indexOf(bd);
   if (i >= 0) state.bandits.splice(i, 1);
-  if (!state.bandits.length && !state.over) msg('The raid is over.', 'good');
+  if (!state.bandits.length && !state.over) { msg('The raid is over.', 'good'); teleEv('raid_end'); }
 }
 
 function destroyBuilding(b, byBandit=null) {
   b.ruined = true; b.hp = 0;
+  teleEv('destroyed', b.type + (byBandit ? ' (raid)' : ''));
   b.burnT = 0; b.smolderT = 25;
   AudioSys.play('crash');
   for (let i=0;i<6;i++) { flamePuff(b.x, 1.5, b.z); smokePuff(b.x, 2.0, b.z, true); }
@@ -2090,12 +2266,20 @@ addEventListener('keydown', e => {
   if (e.code === 'Escape') {
     if ($('settings').style.display !== 'none') { $('settings').style.display = 'none'; return; }
     if (tool === 'wall' && wallDraft.length) { wallDraft = []; startAttach = null; redrawWallPreview(); }
+    else if (selB) selectBuilding(null);
     else setTool(null);
+  }
+  if (e.code === 'Backspace' && tool === 'wall' && wallDraft.length) {
+    e.preventDefault();
+    wallDraft.pop();
+    if (!wallDraft.length) startAttach = null;
+    redrawWallPreview();
   }
   if (e.code === 'Enter' && tool === 'wall') tryCloseWall();
   const idx = ['Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit7','Digit8','Digit9','Digit0'].indexOf(e.code);
   if (idx >= 0 && idx < TOOL_ORDER.length) setTool(TOOL_ORDER[idx]);
   if (e.code === 'KeyX') setTool('demolish');
+  if (e.code === 'KeyB') setTool('barracks');
   if (e.code === 'Space' && state.started && !state.over && $('settings').style.display === 'none') {
     e.preventDefault();
     setSpeed(0);
@@ -2205,7 +2389,10 @@ function handleClick() {
       saveGame();
       if (!keys.ShiftLeft && !keys.ShiftRight) setTool(null);
     }
+    return;
   }
+  // no tool: tap/click a building to pin its ledger card
+  selectBuilding(pickBuilding() || null);
 }
 function pickBuilding() {
   ray.setFromCamera(mouse, camera);
@@ -2216,6 +2403,7 @@ function pickBuilding() {
 // ---------------------------------------------------------------- game over / restart
 function gameOver() {
   state.over = true;
+  teleEv('game_over');
   $('go-stats').textContent = `${state.townName || 'Your town'} stood for ${state.day} days · population ${fmt(state.pop)} · ${state.walls.length} wall${state.walls.length===1?'':'s'}.`;
   $('gameover').style.display = 'flex';
   localStorage.removeItem('bulwark-save');
@@ -2255,7 +2443,7 @@ function loadGame() {
   // rank: stored high-water mark, grandfathering legacy saves by what they built
   let mp = s.maxPop ?? s.pop;
   for (const b of s.buildings) {
-    if (b.type === 'well' || b.type === 'quarry') mp = Math.max(mp, 12);
+    if (b.type === 'well' || b.type === 'quarry' || b.type === 'granary') mp = Math.max(mp, 12);
     if (b.type === 'market' || b.type === 'tower' || b.type === 'townhouse') mp = Math.max(mp, 20);
     if (b.type === 'barracks') mp = Math.max(mp, 32);
   }
@@ -2300,8 +2488,14 @@ function step(dt) {
   state.time += dt;
   const newDay = Math.floor(state.time / DAY) + 1;
   if (newDay !== state.day) {
+    const prevSeason = seasonOf(state.day).nm;
     state.day = newDay;
-    if (state.day === 2) msg('Day 2 — the scouts report bandits mustering beyond the treeline.', 'dim');
+    const s = seasonOf(state.day).nm;
+    if (s !== prevSeason) {
+      teleEv('season', s);
+      msg(`${SEASON_MSGS[s]}`, s === 'Winter' ? 'warn' : 'dim');
+      if (s === 'Winter' && state.food < state.pop * 1.5) msg('The stores look thin for winter.', 'warn');
+    }
     saveGame();
   }
   economyTick(dt);
@@ -2352,6 +2546,7 @@ function step(dt) {
   }
   objT += dt;
   if (objT >= 0.5) { objT = 0; updateObjectives(); }
+  teleSample(dt);
 }
 
 function frame(dt) {
@@ -2379,10 +2574,17 @@ function frame(dt) {
       hintEl.style.top = (mousePx.y + 12) + 'px';
       const cost = wallDraftCost();
       const afford = state.stone >= cost;
+      let enclose = '';
+      if (!startAttach && wallDraft.length >= 3) {
+        const area = Math.abs(shoelace(wallDraft));
+        const n = state.buildings.filter(b => !b.ruined && pointInPoly(b.x, b.z, wallDraft)).length;
+        enclose = `\nencloses ~${Math.round(area)} u² · <span class="safe">${n} building${n===1?'':'s'} inside</span>`;
+      }
       hintEl.innerHTML = `${startAttach ? 'Wall' : 'Ring'} cost: <span class="${afford?'safe':'unsafe'}">🪨${cost}</span>` +
         `\n${wallDraft.length} corner${wallDraft.length===1?'':'s'} — ` +
         (startAttach ? 'end on the same wall to enclose a ward'
-          : (wallDraft.length >= 3 ? 'click the first post or press Enter to close' : 'click to add corners'));
+          : (wallDraft.length >= 3 ? 'click the first post or press Enter to close' : 'click to add corners')) +
+        enclose + '\nBackspace undoes a corner';
     } else hintEl.style.display = 'none';
   } else if (tool === 'gate') {
     const sp = wallSnap(mouseGround.x, mouseGround.z);
@@ -2428,30 +2630,28 @@ function frame(dt) {
       hintEl.style.left = (mousePx.x + 16) + 'px';
       hintEl.style.top = (mousePx.y + 12) + 'px';
       hintEl.innerHTML = `${hoverV.vname} the ${hoverV.trade}`;
-    } else if (b) {
-      const def = BUILD_DEFS[b.type];
+    } else if (b && b !== selB) {
       hintEl.style.display = 'block';
       hintEl.style.left = (mousePx.x + 16) + 'px';
       hintEl.style.top = (mousePx.y + 12) + 'px';
-      let html = `${def.ico} ${def.nm}${b.ruined ? ' — ruin (Demolish to clear)' : ''}${b.onFire ? ' — 🔥 ON FIRE' : ''}`;
-      if (!b.ruined && (b.type === 'house' || b.type === 'townhouse' || b.type === 'keep')) {
-        const occ = Math.round(def.popCap * Math.min(1, state.pop / Math.max(1, popCap())));
-        let rate = b.depth >= 1 ? 2 * (1 + 0.25 * (b.depth - 1)) : 0.8;
-        const hasWell = b._well, hasMkt = b._mkt;
-        if (hasMkt) rate *= 1.3;
-        if (hasWell) rate *= 1.15;
-        html += `\n<span class="${b.depth ? 'safe' : 'unsafe'}">${b.depth ? `🛡 Ward ${['','I','II','III','IV','V'][Math.min(b.depth,5)]}` : '⚠ Outside walls'}</span> · ${occ} folk · 🪙${(occ*rate).toFixed(1)}/day`;
-        html += `\n<span class="${hasWell?'safe':'unsafe'}">⛲ ${hasWell?'well water':'no well'}</span> · <span class="${hasMkt?'safe':'unsafe'}">🏪 ${hasMkt?'market nearby':'no market'}</span>`;
-        if (b.type === 'house' && hasWell && hasMkt && b.depth >= 1) html += `\n<span class="safe">↑ will grow into a townhouse</span>`;
-      }
-      if (!b.ruined && b.hp < b.maxHp - 0.5) html += `\n${Math.round(b.hp)}/${b.maxHp} hp`;
-      hintEl.innerHTML = html;
+      hintEl.innerHTML = buildingInfoHTML(b);
     } else hintEl.style.display = 'none';
   } else hintEl.style.display = 'none';
+
+  // selection card stays live while the town changes around it
+  if (selB) {
+    cardT -= dt;
+    if (cardT <= 0) {
+      cardT = 0.5;
+      if (!state.buildings.includes(selB)) selectBuilding(null);
+      else $('bcard-body').innerHTML = buildingInfoHTML(selB).replace(/\n/g, '<br>');
+    }
+  }
 
   // visual pass: atmosphere, particles, build-in scaling, fire & smoke
   if (!state.started) camYaw += dt * 0.05;   // slow orbit behind the title screen
   updateAtmosphere();
+  seasonVisualTick(dt);
   rainVisualTick(dt);
   AudioSys.update(dt, nightFactor, rainFactor);
   updateParticles(dt);
@@ -2522,7 +2722,7 @@ function frame(dt) {
 }
 
 let last = performance.now(), lastRAF = performance.now();
-let autosaveT = 0, hoverT = 0, hoverB = null, hoverV = null, mapT = 0;
+let autosaveT = 0, hoverT = 0, hoverB = null, hoverV = null, mapT = 0, cardT = 0;
 
 // ---------------------------------------------------------------- minimap
 const MMAP_W = 150, MMAP_EXT = MAP + 20;
@@ -2578,8 +2778,10 @@ function setSpeed(n) {
 }
 document.querySelectorAll('#speedctl button').forEach(b => { b.onclick = () => setSpeed(+b.dataset.spd); });
 function advance(now) {
-  let elapsed = Math.min(1.0, (now - last) / 1000) * (gamePaused ? 0 : gameSpeed);
+  const rawDt = Math.min(1.0, (now - last) / 1000);
+  let elapsed = rawDt * (gamePaused ? 0 : gameSpeed);
   last = now;
+  if (state.started && !state.over) tele.speedSecs[gamePaused ? 'paused' : gameSpeed] += rawDt;
   autosaveT += elapsed;
   while (elapsed > 0) { const h = Math.min(0.05, elapsed); step(h); elapsed -= h; }
   if (autosaveT > 15) { autosaveT = 0; saveGame(); }
@@ -2643,7 +2845,45 @@ function renderSlots() {
     }
     el.appendChild(row);
   }
+  // export/import: towns as files
+  const io = document.createElement('div');
+  io.className = 'slotrow';
+  io.innerHTML = `<span class="snm">File</span><span class="smeta">share or back up this town</span>`;
+  const ex = document.createElement('button');
+  ex.textContent = 'EXPORT';
+  ex.onclick = () => {
+    if (state.started && !state.over) saveGame();
+    const data = localStorage.getItem('bulwark-save');
+    if (!data) { msg('Nothing to export yet.', 'warn'); return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([data], { type:'application/json' }));
+    a.download = `bulwark-${(state.townName || 'town').toLowerCase()}-day${state.day}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  const im = document.createElement('button');
+  im.textContent = 'IMPORT';
+  im.onclick = () => $('importFile').click();
+  io.appendChild(ex);
+  io.appendChild(im);
+  el.appendChild(io);
 }
+$('importFile').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const s = JSON.parse(rd.result);
+      if (!s.buildings || !s.walls) throw new Error('not a town');
+      localStorage.setItem('bulwark-save', rd.result);
+      localStorage.setItem('bulwark-boot-slot', 'bulwark-save');
+      location.reload();
+    } catch (err) { msg('That file is not a BULWARK town.', 'warn'); }
+  };
+  rd.readAsText(f);
+  e.target.value = '';
+});
 function openSettings() {
   $('set-music').value = settings.music;
   $('set-sfx').value = settings.sfx;
@@ -2657,6 +2897,17 @@ $('set-sfx').oninput = e => { settings.sfx = +e.target.value; applySettings(); A
 $('set-amb').oninput = e => { settings.amb = +e.target.value; applySettings(); };
 $('set-shadows').onchange = e => { settings.shadows = e.target.checked; applySettings(); };
 $('settingsClose').onclick = () => { $('settings').style.display = 'none'; };
+$('teleCopy').onclick = async () => {
+  const report = buildTeleReport();
+  try {
+    await navigator.clipboard.writeText(report);
+    msg('Playtest report copied — paste it to Claude.', 'good');
+  } catch (e) {
+    console.log(report);
+    msg('Clipboard blocked — report printed to the console instead.', 'warn');
+  }
+  $('settings').style.display = 'none';
+};
 $('gearbtn').onclick = openSettings;
 $('titleSettings').onclick = openSettings;
 applySettings(false);
@@ -2670,7 +2921,11 @@ function startGame(cont) {
   if (cont && loadGame()) {
     msg('The town wakes.', 'dim');
     updateObjectives(true);   // seed the charter from restored progress, silently
-  } else newTownSetup();
+    teleStart(true);
+  } else {
+    newTownSetup();
+    teleStart(false);
+  }
 }
 {
   const bootSlot = localStorage.getItem('bulwark-boot-slot');
@@ -2698,6 +2953,7 @@ window.BULWARK = {
   clickWall: (x,z) => { const prev = tool; tool = 'wall'; wallClickAt(x, z); tool = prev; },
   cutGate: (x,z) => gateClickAt(x, z),
   removeWallAt: (x,z) => { const sp = wallSnap(x, z); if (sp) removeWall(sp.wall); return !!sp; },
+  teleReport: () => buildTeleReport(),
   start: () => { $('intro').style.display='none'; state.started = true; if (!state.buildings.length) newTownSetup(); },
   sim: (seconds, dt=0.1) => { for (let t=0;t<seconds;t+=dt) step(dt); return { ...state, buildings:state.buildings.length, walls:state.walls.length, bandits:state.bandits.length }; },
 };

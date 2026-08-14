@@ -142,8 +142,28 @@ function sfxBell() {
   }
 }
 
+function sfxFanfare() {
+  const t = ctx.currentTime;
+  // rising herald call, then a bright chord
+  [[392, 0], [523.25, 0.18], [659.25, 0.36]].forEach(([fr, del]) => {
+    const o = ctx.createOscillator(); o.type = 'square';
+    const o2 = ctx.createOscillator(); o2.type = 'sawtooth'; o2.frequency.value = fr*0.5;
+    o.frequency.value = fr;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 2100;
+    const g = ctx.createGain(); env(g, t+del, 0.02, 0.16, 0.35);
+    o.connect(f); o2.connect(f); f.connect(g).connect(sfxBus);
+    o.start(t+del); o2.start(t+del); o.stop(t+del+0.45); o2.stop(t+del+0.45);
+  });
+  [523.25, 659.25, 783.99, 1046.5].forEach(fr => {
+    const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = fr;
+    const g = ctx.createGain(); env(g, t+0.55, 0.03, 0.12, 1.3);
+    o.connect(g).connect(sfxBus); o.start(t+0.55); o.stop(t+2);
+  });
+}
+
 const PATCHES = { thunk:sfxThunk, stone:sfxStone, creak:sfxCreak, horn:sfxHorn,
-  chime:sfxChime, crash:sfxCrash, fall:sfxFall, click:sfxClick, coin:sfxCoin, bell:sfxBell };
+  chime:sfxChime, crash:sfxCrash, fall:sfxFall, click:sfxClick, coin:sfxCoin, bell:sfxBell,
+  fanfare:sfxFanfare };
 
 // ---------------------------------------------------------------- ambience
 function startAmbience() {

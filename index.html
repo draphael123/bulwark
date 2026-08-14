@@ -164,6 +164,41 @@
   #objectives .obj.done .tick { color:#8faf68; }
   #objectives .obj.done .lbl { text-decoration:line-through; }
 
+  /* ---------- rank-up ceremony toast ---------- */
+  #ranktoast {
+    position:fixed; left:50%; top:34%; transform:translate(-50%,-50%) scale(0.8);
+    z-index:15; display:none; pointer-events:none; text-align:center;
+    color:#d9a44a; text-shadow:0 2px 12px #000, 0 0 30px #d9a44a55;
+    font-size:34px; letter-spacing:6px; opacity:0;
+  }
+  #ranktoast .sub { font-size:14px; letter-spacing:3px; color:#cbb98f; margin-top:6px; }
+  #ranktoast.show { display:block; animation:ranktoast 3.6s ease-out forwards; }
+  @keyframes ranktoast {
+    0% { opacity:0; transform:translate(-50%,-50%) scale(0.8); }
+    12% { opacity:1; transform:translate(-50%,-50%) scale(1.06); }
+    18% { transform:translate(-50%,-50%) scale(1.0); }
+    78% { opacity:1; }
+    100% { opacity:0; transform:translate(-50%,-56%) scale(1.0); }
+  }
+
+  /* ---------- building card (tap/click select) ---------- */
+  #bcard {
+    position:fixed; left:14px; bottom:150px; z-index:11; display:none; width:236px;
+    background:linear-gradient(#241a0ef2, #16100ae8); border:1px solid #6b5427;
+    border-radius:10px; padding:12px 14px; font-size:13px; line-height:1.7;
+  }
+  #bcard-x {
+    position:absolute; top:6px; right:10px; cursor:pointer; color:#8a7a58; font-size:14px;
+  }
+  #bcard-x:hover { color:#d9a44a; }
+  #bcard .safe { color:#b8dd8a; }
+  #bcard .unsafe { color:#ff9b6a; }
+  #bcard-demolish {
+    font-family:inherit; font-size:12px; letter-spacing:1px; cursor:pointer; margin-top:8px;
+    padding:5px 14px; background:none; border:1px solid #6b3a2a; color:#d98a6a; border-radius:6px;
+  }
+  #bcard-demolish:hover { background:#3a2016; }
+
   /* ---------- minimap ---------- */
   #minimap {
     position:fixed; right:14px; bottom:14px; z-index:9; display:none;
@@ -206,6 +241,13 @@
 <div id="objectives"></div>
 <div id="raidarrow">➤</div>
 <canvas id="minimap" width="150" height="150"></canvas>
+<div id="bcard">
+  <div id="bcard-x">✕</div>
+  <div id="bcard-body"></div>
+  <button id="bcard-demolish">🔨 Demolish</button>
+</div>
+<div id="ranktoast"><div id="ranktoast-main"></div><div class="sub" id="ranktoast-sub"></div></div>
+<input type="file" id="importFile" accept=".json" style="display:none">
 
 <div class="overlay" id="intro">
   <div class="panel title-panel">
@@ -233,7 +275,10 @@
     <div class="setrow"><label>Shadows</label><input type="checkbox" id="set-shadows"></div>
     <h1 style="font-size:16px; letter-spacing:4px; margin-top:18px; color:#cbb98f">LEDGER OF SAVES</h1>
     <div id="slots"></div>
-    <button id="settingsClose" style="margin-top:16px">CLOSE</button>
+    <div style="display:flex; gap:10px; justify-content:center; margin-top:16px">
+      <button id="teleCopy" class="secondary" style="font-size:13px; padding:8px 16px">📋 COPY PLAYTEST REPORT</button>
+      <button id="settingsClose" style="font-size:13px; padding:8px 22px">CLOSE</button>
+    </div>
   </div>
 </div>
 

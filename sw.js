@@ -1,6 +1,6 @@
 // BULWARK service worker — network-first with cache fallback, so deploys land
 // instantly online and the game still opens offline.
-const CACHE = 'bulwark-v8';
+const CACHE = 'bulwark-v9';
 const CORE = ['.', 'index.html', 'main.js', 'audio.js', 'icons.js', 'tests.js',
   'lib/three.module.js', 'manifest.json', 'icon-192.png', 'icon-512.png'];
 

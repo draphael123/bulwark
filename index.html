@@ -32,14 +32,18 @@
     .panel h1 { font-size:30px; letter-spacing:6px; }
   }
 
-  /* ---------- top resource bar ---------- */
+  /* ---------- top resource bar: a carved oak beam ---------- */
   #topbar {
     position:fixed; top:0; left:0; right:0; height:44px;
     display:flex; align-items:center; gap:22px; padding:0 18px;
-    background:linear-gradient(#241a0eee, #1b140ccc);
-    border-bottom:1px solid #4a3a20; z-index:10; user-select:none;
+    background:linear-gradient(#33251400, #33251400), linear-gradient(#352718, #241a0e 55%, #1b140c);
+    border-bottom:2px solid #6b5427; z-index:10; user-select:none;
     font-size:15px;
+    box-shadow:inset 0 1px 0 #5a462b66, inset 0 2px 0 #4a3a2044, 0 2px 10px #0008;
   }
+  .crestSpot canvas { height:34px; width:auto; display:block; filter:drop-shadow(0 1px 2px #0008); }
+  .crestSpot.big canvas { height:84px; margin:0 auto 6px; }
+  #ranktoast .crestSpot { pointer-events:none; }
   #topbar .res { display:flex; align-items:center; gap:6px; min-width:70px; }
   #topbar .res b { color:#f3e6c8; font-weight:600; }
   #topbar .res .delta { font-size:11px; color:#9a8a68; }
@@ -95,15 +99,20 @@
   .rico { color:#d9c9a8; }
   .rico svg { stroke:#d9c9a8; }
 
-  /* ---------- message log ---------- */
+  /* ---------- message log: the town chronicle ---------- */
   #log {
     position:fixed; left:14px; bottom:14px; z-index:9; width:340px;
-    pointer-events:none; font-size:13px; line-height:1.5;
+    pointer-events:none; font-size:12.5px; line-height:1.45;
   }
-  #log .msg { text-shadow:0 1px 3px #000; opacity:.95; margin-top:2px; }
-  #log .msg.warn { color:#ff9b6a; }
-  #log .msg.good { color:#b8dd8a; }
-  #log .msg.dim  { color:#9a8a68; }
+  #log .msg {
+    opacity:.95; margin-top:3px; display:inline-block; clear:both; float:left;
+    background:#e2d4b2ee; color:#3a2c18; font-style:italic;
+    border-left:3px solid #8a6a3a; border-radius:0 3px 3px 0;
+    padding:2px 10px 2px 8px; box-shadow:0 1px 3px #0006;
+  }
+  #log .msg.warn { color:#7a2412; border-left-color:#a3402a; }
+  #log .msg.good { color:#33511e; border-left-color:#5a7a3a; }
+  #log .msg.dim  { color:#6b5c42; }
 
   /* ---------- cursor hint ---------- */
   #hint {
@@ -293,11 +302,13 @@
   }
   #bcard-demolish:hover { background:#3a2016; }
 
-  /* ---------- minimap ---------- */
+  /* ---------- minimap: the surveyor's chart ---------- */
   #minimap {
     position:fixed; right:14px; bottom:14px; z-index:9; display:none;
     width:150px; height:150px; cursor:pointer;
-    background:#1a140bd9; border:1px solid #4a3a20; border-radius:8px;
+    background:#d9c9a8; border:2px solid #6b5427; border-radius:3px;
+    outline:1px solid #2a1f12; outline-offset:-4px;
+    box-shadow:0 3px 12px #000a;
   }
 
   /* ---------- raid direction arrow ---------- */
@@ -325,6 +336,7 @@
   <span id="speedctl">
     <button data-spd="0" title="Pause (Space)">⏸</button><button data-spd="1" class="on">1×</button><button data-spd="2">2×</button><button data-spd="4">4×</button>
   </span>
+  <span id="crest-top" class="crestSpot" title="The town's arms"></span>
   <span id="daycount">Day 1</span>
 </div>
 <button id="newtown" title="Erase this town and start over">⟲ New Town</button>
@@ -342,7 +354,7 @@
   <div id="bcard-body"></div>
   <button id="bcard-demolish">🔨 Demolish</button>
 </div>
-<div id="ranktoast"><div id="ranktoast-main"></div><div class="sub" id="ranktoast-sub"></div></div>
+<div id="ranktoast"><div class="crestSpot big"></div><div id="ranktoast-main"></div><div class="sub" id="ranktoast-sub"></div></div>
 <input type="file" id="importFile" accept=".json" style="display:none">
 
 <div class="overlay" id="intro">

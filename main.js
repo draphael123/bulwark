@@ -1443,7 +1443,7 @@ function buildMesh(type, bx = 0, bz = 0) {
     // belfry with the town's colours
     g.add(box(1.0, 1.4, 1.0, MAT.plaster, 0, 4.1, 0));
     g.add(cone(0.85, 1.0, MAT.roofB, 0, 5.3, 0, 4));
-    const fl = box(0.05, 0.9, 1.1, MAT.rankBanner, 0, 6.2, 0.55);
+    const fl = box(0.05, 0.9, 1.1, MAT.crest || MAT.rankBanner, 0, 6.2, 0.55);
     fl.userData.isFlag = true; g.add(fl);
     g.add(cyl(0.05, 0.05, 1.6, MAT.timber, 0, 6.0, 0, 5));
     for (const wx of [-1.2, 0, 1.2]) {
@@ -1498,7 +1498,7 @@ function buildMesh(type, bx = 0, bz = 0) {
   } else if (type === 'bannerpole') {
     g.add(cyl(0.28, 0.38, 0.5, MAT.stoneD, 0, 0.25, 0, 6));
     g.add(cyl(0.07, 0.09, 5.4, MAT.timber, 0, 3.0, 0, 6));
-    const fl = box(0.05, 1.5, 1.1, MAT.rankBanner, 0, 5.0, 0.55);
+    const fl = box(0.05, 1.5, 1.1, MAT.crest || MAT.rankBanner, 0, 5.0, 0.55);
     fl.userData.isFlag = true;
     g.add(fl);
     g.add(cone(0.12, 0.3, MAT.banner, 0, 5.9, 0, 5));
@@ -1619,7 +1619,7 @@ function buildMesh(type, bx = 0, bz = 0) {
       g.add(cone(1.1, 1.6, MAT.roofB, px, 6.4, pz, 8));
     }
     g.add(cyl(0.08, 0.08, 3.0, MAT.timber, 0, 6.0, 0, 6));
-    const kf = box(0.06, 1.0, 1.4, MAT.rankBanner, 0, 7.0, 0.7);
+    const kf = box(0.06, 1.0, 1.4, MAT.crest || MAT.rankBanner, 0, 7.0, 0.7);
     kf.userData.isFlag = true;
     g.add(kf);
     for (const ry of [0, Math.PI/2, Math.PI, -Math.PI/2]) {
@@ -1937,7 +1937,7 @@ function makeFigure(bodyColor, role='villager') {
     const spear = cyl(0.03, 0.03, 1.7, mat(0x6e4a2a), 0, -0.25, 0, 5);
     spear.add(cone(0.06, 0.18, mat(0xb9bec4), 0, 0.94, 0, 6));
     armR.add(spear);                                              // carried in the right hand
-    const shield = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.42, 0.34), mat(0x7a3020));
+    const shield = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.42, 0.34), MAT.crest || mat(0x7a3020));
     shield.position.set(-0.09, -0.3, 0); armL.add(shield);
   } else if (role === 'monk') {
     // robe: swap the legs for a long habit
@@ -3764,6 +3764,100 @@ function setEdict(key, val) {
   saveGame();
 }
 
+// ---------------------------------------------------------------- heraldry
+// every town flies its own arms, derived from its name — two towns should
+// never share a flag. Drawn on the rank-colored banner cloth.
+let crestCanvas = null, crestTex = null;
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+const CREST_FIELDS = ['#c23b2a', '#2e4a7a', '#3e6a3a', '#7a4a8c', '#2a2a30', '#7a3020', '#3a7a8a', '#9c6a1a'];
+const CREST_METALS = ['#e8dcc2', '#d9c9a8', '#f2e6c8'];
+function makeCrest() {
+  let x = (hashStr(state.townName || 'town') ^ (state.seed || 1)) || 7;
+  const rnd = () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; };
+  const W = 96, H = 112;
+  const c = crestCanvas || (crestCanvas = document.createElement('canvas'));
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  // banner cloth in the rank's color
+  g.fillStyle = '#' + new THREE.Color(RANK_BANNER_COLORS[state.rankIdx || 0]).getHexString();
+  g.fillRect(0, 0, W, H);
+  const field = CREST_FIELDS[(rnd()*CREST_FIELDS.length)|0];
+  let metal = CREST_METALS[(rnd()*CREST_METALS.length)|0];
+  const shield = () => {
+    g.beginPath();
+    g.moveTo(14, 12); g.lineTo(W-14, 12); g.lineTo(W-14, H*0.52);
+    g.quadraticCurveTo(W-14, H-20, W/2, H-10);
+    g.quadraticCurveTo(14, H-20, 14, H*0.52);
+    g.closePath();
+  };
+  shield(); g.fillStyle = field; g.fill();
+  // a division of the field
+  g.save(); shield(); g.clip();
+  g.fillStyle = metal;
+  const div = (rnd()*4)|0;
+  if (div === 1) g.fillRect(0, 0, W, H*0.4);
+  else if (div === 2) g.fillRect(W/2, 0, W/2, H);
+  else if (div === 3) { g.beginPath(); g.moveTo(0, 0); g.lineTo(W, 0); g.lineTo(0, H); g.closePath(); g.fill(); }
+  g.restore();
+  // the charge, in ink
+  g.save(); shield(); g.clip();
+  const ink = '#241a10';
+  g.strokeStyle = ink; g.fillStyle = ink;
+  g.lineWidth = 4; g.lineCap = 'round'; g.lineJoin = 'round';
+  g.translate(W/2, H*0.5);
+  const charge = (rnd()*6)|0;
+  if (charge === 0) {           // the tower
+    g.strokeRect(-12, -14, 24, 30);
+    g.beginPath(); g.moveTo(-12, -14); g.lineTo(-12, -20); g.lineTo(-5, -20); g.lineTo(-5, -14);
+    g.moveTo(5, -14); g.lineTo(5, -20); g.lineTo(12, -20); g.lineTo(12, -14); g.stroke();
+    g.fillRect(-4, 4, 8, 12);
+  } else if (charge === 1) {    // the stag
+    g.beginPath();
+    g.moveTo(-6, 16); g.lineTo(-6, -2); g.lineTo(-14, -10); g.moveTo(-6, -2); g.lineTo(-12, -18);
+    g.moveTo(6, 16); g.lineTo(6, -2); g.lineTo(14, -10); g.moveTo(6, -2); g.lineTo(12, -18);
+    g.stroke();
+    g.beginPath(); g.arc(0, 10, 7, 0, 6.29); g.fill();
+  } else if (charge === 2) {    // the sheaf
+    g.beginPath();
+    g.moveTo(-10, 16); g.lineTo(-3, -14); g.moveTo(0, 16); g.lineTo(0, -16); g.moveTo(10, 16); g.lineTo(3, -14);
+    g.stroke();
+    g.lineWidth = 5; g.beginPath(); g.moveTo(-11, 6); g.lineTo(11, 6); g.stroke();
+  } else if (charge === 3) {    // the key
+    g.beginPath(); g.arc(0, -8, 7, 0, 6.29); g.stroke();
+    g.beginPath(); g.moveTo(0, -1); g.lineTo(0, 16); g.moveTo(0, 10); g.lineTo(7, 10); g.moveTo(0, 16); g.lineTo(9, 16); g.stroke();
+  } else if (charge === 4) {    // the star
+    g.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI/2 + i * Math.PI*4/5;
+      const px = Math.cos(a)*15, py = Math.sin(a)*15;
+      i ? g.lineTo(px, py) : g.moveTo(px, py);
+    }
+    g.closePath(); g.fill();
+  } else {                      // the crescent
+    g.beginPath(); g.arc(0, 0, 14, 0.45, Math.PI - 0.45, false); g.stroke();
+    g.beginPath(); g.arc(0, -6, 14, 0.65, Math.PI - 0.65, false); g.stroke();
+  }
+  g.restore();
+  shield(); g.lineWidth = 4.5; g.strokeStyle = ink; g.stroke();
+  if (!crestTex) {
+    crestTex = new THREE.CanvasTexture(c);
+    crestTex.colorSpace = THREE.SRGBColorSpace;
+    MAT.crest = new THREE.MeshLambertMaterial({ map: crestTex });
+  } else crestTex.needsUpdate = true;
+  // stamp the HUD copies (drawn, never read back — canvas readback is spoofed here)
+  document.querySelectorAll('.crestSpot').forEach(el => {
+    el.innerHTML = '';
+    const cc = document.createElement('canvas');
+    cc.width = W; cc.height = H;
+    cc.getContext('2d').drawImage(c, 0, 0);
+    el.appendChild(cc);
+  });
+}
+
 // population ranks — growth unlocks the deeper toolbox (high-water: never re-locks)
 function toolLocked(t) {
   for (let i = state.rankIdx + 1; i < RANKS.length; i++)
@@ -3777,6 +3871,7 @@ function rankTick() {
   if (idx > state.rankIdx) {
     state.rankIdx = idx;
     MAT.rankBanner.color.setHex(RANK_BANNER_COLORS[idx]);
+    makeCrest();   // the arms fly on new cloth
     const r = RANKS[idx];
     teleEv('rank_up', r.nm);
     const names = r.unlocks.map(t => BUILD_DEFS[t] ? BUILD_DEFS[t].nm : t).join(', ');
@@ -4751,6 +4846,7 @@ function loadGame() {
   for (let i = 0; i < RANKS.length; i++) if (mp >= RANKS[i].pop) state.rankIdx = i;
   MAT.rankBanner.color.setHex(RANK_BANNER_COLORS[state.rankIdx]);
   state.townName = s.townName || '';
+  makeCrest();
   refreshPaletteLocks();
   refreshCoverage();
   for (const w of s.walls) {
@@ -4782,6 +4878,7 @@ function newTownSetup(diff = 'standard') {
   const region = REGIONS[Math.random()*REGIONS.length|0];
   state.seed = region.seed;
   state.regionNm = region.nm;
+  makeCrest();
   scatterWorld(region.seed);
   for (const c of [...state.wild]) removeWild(c);   // the old land's animals go with it
   state.roads = [];
@@ -5175,31 +5272,73 @@ const mmapCtx = mmapEl.getContext('2d');
 const MM_COLORS = { keep:'#d9a44a', house:'#c9b184', townhouse:'#e0c088', market:'#a05050',
   well:'#6a9ab8', farm:'#8a9a4a', woodcutter:'#7a5c38', quarry:'#8a8a84', tower:'#b0b8c0', barracks:'#7a8598' };
 const mm = v => (v + MMAP_EXT) / (MMAP_EXT*2) * MMAP_W;
+// the minimap is a surveyor's chart: ink on parchment
 function drawMinimap() {
   mmapEl.style.display = 'block';
   const g = mmapCtx;
-  g.clearRect(0, 0, MMAP_W, MMAP_W);
-  // walls
-  g.strokeStyle = '#b8b2a4'; g.lineWidth = 1.4;
+  const INKM = '#2a1f12';
+  // parchment ground with a faint aged edge
+  g.fillStyle = '#d9c9a8';
+  g.fillRect(0, 0, MMAP_W, MMAP_W);
+  const edge = g.createRadialGradient(MMAP_W/2, MMAP_W/2, MMAP_W*0.45, MMAP_W/2, MMAP_W/2, MMAP_W*0.75);
+  edge.addColorStop(0, 'rgba(138,106,58,0)');
+  edge.addColorStop(1, 'rgba(138,106,58,0.35)');
+  g.fillStyle = edge;
+  g.fillRect(0, 0, MMAP_W, MMAP_W);
+  // trees sketched as light stipple
+  g.fillStyle = 'rgba(90,110,60,0.5)';
+  for (let i = 0; i < trees.length; i += 3) {
+    const t = trees[i];
+    g.fillRect(mm(t.x)-1, mm(t.z)-1, 2, 2);
+  }
+  // roads as drawn routes
+  g.fillStyle = '#8a6a44';
+  for (const [gx, gz] of state.roads) g.fillRect(mm(gx)-1, mm(gz)-1, 2.4, 2.4);
+  // wards washed faintly inside their walls
+  for (const w of state.walls) {
+    if (!w.closed || w.breached) continue;
+    g.beginPath();
+    w.poly.forEach((p, i) => { i ? g.lineTo(mm(p.x), mm(p.z)) : g.moveTo(mm(p.x), mm(p.z)); });
+    g.closePath();
+    g.fillStyle = 'rgba(154,120,74,0.22)';
+    g.fill();
+  }
+  // walls in confident ink
+  g.strokeStyle = INKM; g.lineWidth = 1.8; g.lineJoin = 'round';
   for (const w of state.walls) {
     g.beginPath();
     w.path.forEach((p, i) => { i ? g.lineTo(mm(p.x), mm(p.z)) : g.moveTo(mm(p.x), mm(p.z)); });
     if (w.closed) g.closePath();
+    if (w.breached) g.setLineDash([3, 3]);
+    g.stroke();
+    g.setLineDash([]);
+  }
+  // buildings as woodcut marks — the keep bears the town's red
+  for (const b of state.buildings) {
+    if (b.ruined) { g.fillStyle = 'rgba(90,80,66,0.6)'; g.fillRect(mm(b.x)-1.5, mm(b.z)-1.5, 3, 3); continue; }
+    if (b.onFire) { g.fillStyle = '#c24a1a'; g.fillRect(mm(b.x)-2.5, mm(b.z)-2.5, 5, 5); continue; }
+    if (b.type === 'keep') {
+      g.fillStyle = '#8a2a1a';
+      g.fillRect(mm(b.x)-3, mm(b.z)-3, 6, 6);
+      g.strokeStyle = INKM; g.lineWidth = 1;
+      g.strokeRect(mm(b.x)-3, mm(b.z)-3, 6, 6);
+      continue;
+    }
+    g.fillStyle = INKM;
+    g.fillRect(mm(b.x)-1.5, mm(b.z)-1.5, 3, 3);
+  }
+  // caravans in amber, raiders as red crosses
+  g.fillStyle = '#b8862a';
+  for (const c of state.caravans) g.fillRect(mm(c.x)-1.5, mm(c.z)-1.5, 3, 3);
+  g.strokeStyle = '#a3281a'; g.lineWidth = 1.6;
+  for (const bd of state.bandits) {
+    g.beginPath();
+    g.moveTo(mm(bd.x)-2.5, mm(bd.z)-2.5); g.lineTo(mm(bd.x)+2.5, mm(bd.z)+2.5);
+    g.moveTo(mm(bd.x)+2.5, mm(bd.z)-2.5); g.lineTo(mm(bd.x)-2.5, mm(bd.z)+2.5);
     g.stroke();
   }
-  // buildings
-  for (const b of state.buildings) {
-    g.fillStyle = b.ruined ? '#3a352e' : (b.onFire ? '#ff7030' : (MM_COLORS[b.type] || '#999'));
-    const s = b.type === 'keep' ? 5 : 3;
-    g.fillRect(mm(b.x)-s/2, mm(b.z)-s/2, s, s);
-  }
-  // caravans + raiders
-  g.fillStyle = '#e8dcc2';
-  for (const c of state.caravans) g.fillRect(mm(c.x)-1.5, mm(c.z)-1.5, 3, 3);
-  g.fillStyle = '#ff4030';
-  for (const bd of state.bandits) { g.beginPath(); g.arc(mm(bd.x), mm(bd.z), 2, 0, Math.PI*2); g.fill(); }
-  // camera target
-  g.strokeStyle = '#d9a44a'; g.lineWidth = 1;
+  // the eye of the camera
+  g.strokeStyle = '#8a6a3a'; g.lineWidth = 1;
   g.strokeRect(mm(camTarget.x)-4, mm(camTarget.z)-4, 8, 8);
 }
 mmapEl.addEventListener('pointerdown', e => {

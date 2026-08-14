@@ -215,10 +215,11 @@ function updateAtmosphere() {
     sun.intensity *= 1 - 0.5 * rainFactor;
     hemi.intensity *= 1 - 0.3 * rainFactor;
   }
-  // low mist hangs over the meadows around dawn
+  // low mist hangs over the meadows around dawn — but never swallows the
+  // town itself: the near plane stays beyond the camera's working distance
   const mist = Math.max(0, 1 - Math.abs(f - 0.10) / 0.06) * (1 - rainFactor);
-  scene.fog.near = 200 - mist * 145;
-  scene.fog.far = 560 - mist * 250;
+  scene.fog.near = Math.max(camDist + 45, 200 - mist * 120);
+  scene.fog.far = Math.max(camDist + 280, 560 - mist * 200);
   nightFactor = Math.max(0, Math.min(1, 1 - (sun.intensity - 0.3) / 1.0));
   MAT.window.opacity = nightFactor * 0.95;
   // hearth-light: warmer and a touch stronger at night, with a candle flicker
@@ -313,6 +314,74 @@ wearMesh.position.y = 0.03;
 wearMesh.renderOrder = 1;
 scene.add(wearMesh);
 let wearDirty = false, wearUp = 0;
+
+// the town underfoot: wards read as lived-in ground, not lawn — trampled
+// earth inside the walls, packed plazas at the civic doors. Redrawn only
+// when walls or buildings change.
+const townCanvas = document.createElement('canvas');
+townCanvas.width = townCanvas.height = 512;
+const townCtx = townCanvas.getContext('2d');
+const townTex = new THREE.CanvasTexture(townCanvas);
+townTex.colorSpace = THREE.SRGBColorSpace;
+const townMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(WEAR_EXTENT*2, WEAR_EXTENT*2),
+  new THREE.MeshLambertMaterial({ map: townTex, transparent: true, depthWrite: false })
+);
+townMesh.rotation.x = -Math.PI/2;
+townMesh.position.y = 0.022;
+scene.add(townMesh);
+const tU = v => (v + WEAR_EXTENT) / (WEAR_EXTENT*2) * 512;
+const tR = v => v / (WEAR_EXTENT*2) * 512;
+function redrawTownGround() {
+  const g = townCtx;
+  g.clearRect(0, 0, 512, 512);
+  // ward interiors trample down; nested wards more so
+  for (const w of state.walls) {
+    if (!w.closed || w.breached || !w.poly || w.poly.length < 3) continue;
+    let cx = 0, cz = 0;
+    for (const p of w.poly) { cx += p.x; cz += p.z; }
+    cx /= w.poly.length; cz /= w.poly.length;
+    let depth = 0;
+    for (const o of state.walls)
+      if (o !== w && o.closed && !o.breached && o.poly && pointInPoly(cx, cz, o.poly)) depth++;
+    g.beginPath();
+    w.poly.forEach((p, i) => i ? g.lineTo(tU(p.x), tU(p.z)) : g.moveTo(tU(p.x), tU(p.z)));
+    g.closePath();
+    g.fillStyle = `rgba(138,108,72,${0.24 + depth*0.07})`;
+    g.fill();
+    // the patrol line worn along the wall's foot
+    g.lineWidth = 6;
+    g.strokeStyle = 'rgba(116,92,58,0.30)';
+    g.stroke();
+  }
+  // packed-earth plazas at civic doors, work aprons at the industries
+  const disc = (x, z, r, col, a) => {
+    const grad = g.createRadialGradient(tU(x), tU(z), tR(r)*0.25, tU(x), tU(z), tR(r));
+    grad.addColorStop(0, col.replace('$A', a));
+    grad.addColorStop(1, col.replace('$A', 0));
+    g.fillStyle = grad;
+    g.fillRect(tU(x)-tR(r), tU(z)-tR(r), tR(r)*2, tR(r)*2);
+  };
+  const PLAZA = { market: 6.5, well: 4.5, fountain: 5, tavern: 4.5, townhall: 6, chapel: 5, keep: 9 };
+  const APRON = { woodcutter: 4, quarry: 5, sawmill: 4, mill: 4, tradepost: 4.5, barracks: 4.5 };
+  for (const b of state.buildings) {
+    if (b.ruined || b.buildT < 1) continue;
+    if (PLAZA[b.type]) {
+      disc(b.x, b.z, PLAZA[b.type], 'rgba(151,124,88,$A)', 0.65);
+      const h = Math.abs(Math.sin(b.x*7.3 + b.z*3.1) * 977) % 1;
+      g.fillStyle = 'rgba(122,118,108,0.5)';
+      for (let i = 0; i < 9; i++) {
+        const a2 = h*6.28 + i*0.7, rr = tR(PLAZA[b.type] * (0.3 + ((h*(i+2)*13) % 1)*0.6));
+        g.beginPath();
+        g.arc(tU(b.x)+Math.cos(a2)*rr, tU(b.z)+Math.sin(a2)*rr, tR(0.35), 0, 6.29);
+        g.fill();
+      }
+    } else if (APRON[b.type]) {
+      disc(b.x, b.z, APRON[b.type], 'rgba(128,102,68,$A)', 0.55);
+    }
+  }
+  townTex.needsUpdate = true;
+}
 // roads: player-laid paths on a 2u grid, in three grades — folk walk faster
 const roadSet = new Map();   // "gx,gz" -> tierKey
 const roadKey = (x, z) => `${Math.round(x/2)*2},${Math.round(z/2)*2}`;
@@ -1441,11 +1510,12 @@ function buildMesh(type, bx = 0, bz = 0) {
     kf.userData.isFlag = true;
     g.add(kf);
     for (const ry of [0, Math.PI/2, Math.PI, -Math.PI/2]) {
-      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.8), MAT.window);
+      // slim lancets, softly lit — the keep should glower, not glare
+      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.7), MAT.window);
       win.position.set(Math.sin(ry)*2.32, 3.1, Math.cos(ry)*2.32);
       win.rotation.y = ry; g.add(win);
       const glow = new THREE.Sprite(MAT.windowGlow);
-      glow.scale.setScalar(1.6);
+      glow.scale.setScalar(1.1);
       glow.position.copy(win.position);
       g.add(glow);
     }
@@ -2414,6 +2484,7 @@ function rebuildWall(w) {
 
 function refreshDepths() {
   for (const b of state.buildings) b.depth = wardDepth(b.x, b.z);
+  redrawTownGround();
 }
 
 // ---------------------------------------------------------------- placement + tools
@@ -2510,6 +2581,7 @@ function finishConstruction(b) {
   dustBurst(b.x, b.z, Math.max(BUILD_DEFS[b.type].w, BUILD_DEFS[b.type].d)/2 + 0.5, 8);
   AudioSys.play('thunk');
   refreshCoverage();   // a finished well/market starts covering only now
+  redrawTownGround();  // and its plaza gets packed down
 }
 
 function placeBuilding(type, x, z, free=false, rot=0) {
@@ -2548,16 +2620,29 @@ function placeBuilding(type, x, z, free=false, rot=0) {
   state.buildings.push(b);
   refreshCoverage();
   stampFoundation(x, z, def.w, def.d);
+  if (b.buildT >= 1) redrawTownGround();   // free placements are done at once
+  // the Keep is one-of-a-kind: move the hand straight to the wall tool, so the
+  // dead ghost doesn't hover red over the fresh keep
+  if (type === 'keep' && !free) setTool('wall');
   return b;
 }
 
+function removeFlash(b) {
+  if (b._flashSpr) {
+    scene.remove(b._flashSpr);
+    b._flashSpr.material.dispose();
+    b._flashSpr = null;
+  }
+}
 function demolish(b) {
   if (b.type === 'keep') { msg('The Keep cannot be demolished.', 'warn'); return; }
   cleanupConstruction(b);
+  removeFlash(b);
   scene.remove(b.group);
   disposeGroup(b.group);
   state.buildings.splice(state.buildings.indexOf(b), 1);
   refreshCoverage();
+  redrawTownGround();
   if (!b.ruined) {
     const def = BUILD_DEFS[b.type];
     for (const k in def.cost) state[k] += Math.floor(def.cost[k]*0.5);
@@ -3347,6 +3432,7 @@ function upgradeTick(dt) {
     AudioSys.play('thunk');
     teleEv(into);
     msg(note, 'good');
+    redrawTownGround();
     saveGame();
   };
   for (const b of state.buildings) {
@@ -3726,6 +3812,9 @@ function removeBandit(bd) {
 function destroyBuilding(b, byBandit=null) {
   b.ruined = true; b.hp = 0;
   cleanupConstruction(b);
+  removeFlash(b);
+  b.hitFlash = 0;
+  redrawTownGround();
   teleEv('destroyed', b.type + (byBandit ? ' (raid)' : ''));
   b.burnT = 0; b.smolderT = 25;
   AudioSys.play('crash');
@@ -4282,6 +4371,7 @@ function newTownSetup(diff = 'standard') {
   for (const c of [...state.wild]) removeWild(c);   // the old land's animals go with it
   state.roads = [];
   roadSet.clear();
+  redrawTownGround();
   msg(`${state.townName}, in ${state.regionNm}. First: choose ground and raise your Keep.`, 'good');
   setTool('keep');
   updateObjectives(true);
@@ -4347,11 +4437,20 @@ function step(dt) {
         b.respawnT = 14;
       }
     }
+    // hit flash is a sprite, never shared-material emissive — a building
+    // destroyed mid-flash used to leave every stone in town glowing red
     if (b.hitFlash > 0) {
       b.hitFlash -= dt;
-      const f = b.hitFlash > 0 ? Math.sin(state.time*30)*0.5+0.5 : 0;
-      b.group.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setRGB(f*0.6, f*0.1, 0); });
-      if (b.hitFlash <= 0) b.group.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setRGB(0,0,0); });
+      if (!b._flashSpr) {
+        const fdef = BUILD_DEFS[b.type];
+        b._flashSpr = new THREE.Sprite(new THREE.SpriteMaterial({
+          map:P_TEX, color:0xff5030, transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false }));
+        b._flashSpr.scale.setScalar(Math.max(fdef.w, fdef.d) * 1.5);
+        b._flashSpr.position.set(b.x, 1.6, b.z);
+        scene.add(b._flashSpr);
+      }
+      b._flashSpr.material.opacity = Math.sin(state.time*30)*0.2 + 0.4;
+      if (b.hitFlash <= 0) removeFlash(b);
     }
   }
   for (const a of [...state.arrows]) arrowTick(a, dt);
@@ -5069,6 +5168,7 @@ window.BULWARK = {
       bin += String.fromCharCode.apply(null, flip.subarray(i, i + 8192));
     return { w, h, b64: btoa(bin), calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
   },
+  _dbg: { renderer, scene, camera },
   start: () => { $('intro').style.display='none'; state.started = true; if (!state.buildings.length) newTownSetup(); },
   sim: (seconds, dt=0.1) => { for (let t=0;t<seconds;t+=dt) step(dt); return { ...state, buildings:state.buildings.length, walls:state.walls.length, bandits:state.bandits.length }; },
 };

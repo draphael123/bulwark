@@ -88,6 +88,8 @@ function runTests() {
   B.step(0.1);
   const gran = B.place('granary', -8, -8);
   ok('granary unlocks at Village', !!gran);
+  B.sim(9);   // let the crew finish building it
+  ok('construction completes and crew leaves', gran.buildT >= 1 && !gran._scaff);
   S.food = 9999;
   B.step(0.1);
   ok('food clamps to granary cap (120+180)', Math.round(S.food) === 300);

@@ -1283,6 +1283,14 @@ function canAfford(cost) {
 }
 function pay(cost, sign=1) { for (const k in cost) state[k] -= cost[k]*sign; }
 
+function pointInBuilding(x, z) {
+  for (const b of state.buildings) {
+    if (b.ruined) continue;
+    const def = BUILD_DEFS[b.type];
+    if (Math.abs(x-b.x) < def.w/2 + 0.5 && Math.abs(z-b.z) < def.d/2 + 0.5) return true;
+  }
+  return false;
+}
 function overlapsBuilding(x, z, w, d, ignore=null) {
   for (const b of state.buildings) {
     if (b === ignore) continue;
@@ -1321,7 +1329,34 @@ function placementCheck(type, x, z) {
   return { ok:true };
 }
 
-function placeBuilding(type, x, z, free=false) {
+const BUILD_TIME = 8;   // seconds of visible construction
+function makeScaffold(def) {
+  const g = new THREE.Group();
+  const hw = def.w/2 + 0.5, hd = def.d/2 + 0.5, h = 3.2;
+  for (const [sx, sz] of [[-hw,-hd],[hw,-hd],[-hw,hd],[hw,hd]])
+    g.add(cyl(0.09, 0.09, h, MAT.timber, sx, h/2, sz, 5));
+  for (const s of [-1, 1]) {
+    g.add(box(hw*2, 0.1, 0.1, MAT.timber, 0, h-0.4, s*hd));
+    g.add(box(0.1, 0.1, hd*2, MAT.timber, s*hw, h-0.4, 0));
+  }
+  return g;
+}
+function cleanupConstruction(b) {
+  if (b._scaff) { scene.remove(b._scaff); disposeGroup(b._scaff); b._scaff = null; }
+  if (b._crew) {
+    for (const w of b._crew) { scene.remove(w.grp); disposeGroup(w.grp); }
+    b._crew = null;
+  }
+}
+function finishConstruction(b) {
+  cleanupConstruction(b);
+  b.group.scale.set(1, 1, 1);
+  dustBurst(b.x, b.z, Math.max(BUILD_DEFS[b.type].w, BUILD_DEFS[b.type].d)/2 + 0.5, 8);
+  AudioSys.play('thunk');
+  refreshCoverage();   // a finished well/market starts covering only now
+}
+
+function placeBuilding(type, x, z, free=false, rot=0) {
   const def = BUILD_DEFS[type];
   if (!free) {
     const chk = placementCheck(type, x, z);
@@ -1330,10 +1365,29 @@ function placeBuilding(type, x, z, free=false) {
   }
   const group = buildMesh(type, x, z);
   group.position.set(x, 0, z);
+  group.rotation.y += rot;
   scene.add(group);
-  const b = { type, x, z, hp:def.hp, maxHp:def.hp, depth:wardDepth(x,z), ruined:false, group, hitFlash:0,
+  const b = { type, x, z, rot, hp:def.hp, maxHp:def.hp, depth:wardDepth(x,z), ruined:false, group, hitFlash:0,
     buildT: free ? 1 : 0, burnT: 0, smolderT: 0 };
-  if (!free) { dustBurst(x, z, Math.max(def.w, def.d)/2 + 0.5, 10); group.scale.setScalar(0.25); AudioSys.play('thunk'); }
+  if (!free) {
+    dustBurst(x, z, Math.max(def.w, def.d)/2 + 0.5, 10);
+    group.scale.setScalar(0.25);
+    AudioSys.play('thunk');
+    // scaffold + a two-man crew hammer away until it's done
+    b._scaff = makeScaffold(def);
+    b._scaff.position.set(x, 0, z);
+    scene.add(b._scaff);
+    b._crew = [];
+    for (const s of [-1, 1]) {
+      const wgrp = makeFigure(0x8c6a3a, 'villager');
+      wgrp.scale.setScalar(0.8);
+      const wx = x + s*(def.w/2 + 1.0), wz = z + s*0.6;
+      wgrp.position.set(wx, 0, wz);
+      wgrp.rotation.y = Math.atan2(x - wx, z - wz);
+      scene.add(wgrp);
+      b._crew.push({ grp: wgrp, bob: Math.random()*6 });
+    }
+  }
   b._flags = [];
   group.traverse(o => { o.userData.b = b; if (o.userData.isFlag) b._flags.push(o); });
   state.buildings.push(b);
@@ -1344,6 +1398,7 @@ function placeBuilding(type, x, z, free=false) {
 
 function demolish(b) {
   if (b.type === 'keep') { msg('The Keep cannot be demolished.', 'warn'); return; }
+  cleanupConstruction(b);
   scene.remove(b.group);
   disposeGroup(b.group);
   state.buildings.splice(state.buildings.indexOf(b), 1);
@@ -1815,7 +1870,7 @@ function popCap() {
 }
 function foodCap() {
   let c = 120;
-  for (const b of state.buildings) if (!b.ruined && b.type === 'granary') c += BUILD_DEFS.granary.storage;
+  for (const b of state.buildings) if (!b.ruined && b.buildT >= 1 && b.type === 'granary') c += BUILD_DEFS.granary.storage;
   return c;
 }
 function foodRate() { // per day
@@ -2028,7 +2083,7 @@ function economyTick(dt) {
   const markets = state.buildings.filter(b => !b.ruined && b.type === 'market');
   const housesInside = [];
   for (const b of state.buildings) {
-    if (b.ruined) continue;
+    if (b.ruined || b.buildT < 1) continue;   // under construction = not yet working
     if (b.type === 'farm') state.food += BUILD_DEFS.farm.foodPerDay * seasonOf(state.day).farm * (state.raining ? 1.25 : 1) * perDay;
     else if (b.type === 'woodcutter') state.wood += BUILD_DEFS.woodcutter.woodPerDay * perDay;
     else if (b.type === 'quarry') state.stone += BUILD_DEFS.quarry.stonePerDay * perDay;
@@ -2201,6 +2256,7 @@ function removeBandit(bd) {
 
 function destroyBuilding(b, byBandit=null) {
   b.ruined = true; b.hp = 0;
+  cleanupConstruction(b);
   teleEv('destroyed', b.type + (byBandit ? ' (raid)' : ''));
   b.burnT = 0; b.smolderT = 25;
   AudioSys.play('crash');
@@ -2338,7 +2394,8 @@ function villagerTick(dt) {
       if (dest) {
         const dd = BUILD_DEFS[dest.type];
         const oa = Math.random()*Math.PI*2;
-        const off = Math.max(dd.w, dd.d)/2 + 1.0 + Math.random()*1.5;   // just outside the footprint
+        // clear the footprint even on the diagonal, so nobody shoves the walls
+        const off = Math.max(dd.w, dd.d)/2 * 1.45 + 1.0 + Math.random()*1.5;
         v.path = findPath(v.x, v.z, dest.x + Math.cos(oa)*off, dest.z + Math.sin(oa)*off);
         if (v.path) {
           v.pathi = 0; v.wpT = 0;
@@ -2353,9 +2410,9 @@ function villagerTick(dt) {
         }
       }
       if (!v.path) {
-        // no errand (or sealed ward): wander near home without ghosting through walls
+        // no errand (or sealed ward): wander near home — never to a spot inside a building
         const tx = v.home.x + (Math.random()-0.5)*12, tz = v.home.z + (Math.random()-0.5)*12;
-        if (canWalk(v.x, v.z, tx, tz)) { v.path = [{x:tx, z:tz}]; v.pathi = 0; }
+        if (!pointInBuilding(tx, tz) && canWalk(v.x, v.z, tx, tz)) { v.path = [{x:tx, z:tz}]; v.pathi = 0; v.wpT = 0; }
         else v.wait = 1.5;
         if (v.phase === 'homeward') v.phase = 'idle';
       }
@@ -2634,6 +2691,11 @@ function step(dt) {
   for (const g of [...state.guards]) guardTick(g, dt);
   for (const b of state.buildings) {
     if (b.ruined) continue;
+    if (b.buildT < 1) {
+      b.buildT = Math.min(1, b.buildT + dt / BUILD_TIME);
+      if (b.buildT >= 1) finishConstruction(b);
+      continue;   // nothing works until it's built
+    }
     if (b.type === 'tower' && b.depth === 0 || b.type === 'tower') towerTick(b, dt);
     if (b.type === 'barracks') {
       const mine = state.guards.filter(g => g.home === b).length;
@@ -2812,9 +2874,14 @@ function frame(dt) {
   }
   for (const b of state.buildings) {
     if (b.buildT < 1) {
-      b.buildT = Math.min(1, b.buildT + dt);
       const e = 1 - Math.pow(1 - b.buildT, 3);
       b.group.scale.set(0.3+0.7*e, 0.15+0.85*e, 0.3+0.7*e);
+      if (b._crew) for (const w of b._crew) {   // hammering
+        w.bob += dt * 10;
+        const L = w.grp.userData.limbs;
+        if (L) L.armR.rotation.x = -0.5 + Math.sin(w.bob) * 0.9;
+        w.grp.position.y = Math.abs(Math.sin(w.bob * 0.5)) * 0.05;
+      }
     }
     if (b._flags && !b.ruined) {
       for (const f of b._flags) f.rotation.x = Math.sin(state.time*2.3 + b.x*0.7) * 0.12;

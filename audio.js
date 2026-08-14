@@ -11,9 +11,17 @@ let started = false;
 let windSrc = null, cricketGain = null, birdTimer = 3, cricketLFO = null, rainGain = null;
 // music: real published tracks — Kevin MacLeod (incompetech.com), CC BY 3.0
 const TRACKS = [
-  'music/master-of-the-feast.mp3',
-  'music/folk-round.mp3',
+  'music/thatched-villagers.mp3',
+  'music/teller-of-the-tales.mp3',
+  'music/skye-cuillin.mp3',
+  'music/achaidh-cheide.mp3',
+  'music/suonatore-di-liuto.mp3',
+  'music/lord-of-the-land.mp3',
+  'music/angevin-b.mp3',
+  'music/virtutes-instrumenti.mp3',
   'music/minstrel-guild.mp3',
+  'music/folk-round.mp3',
+  'music/master-of-the-feast.mp3',
 ];
 let musicEl = null, trackIdx = Math.floor(Math.random() * TRACKS.length);
 

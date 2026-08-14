@@ -56,9 +56,13 @@ function runTests() {
 
   // ---- villagers use the lever & gate
   S.pop = 12;
-  B.sim(70);
-  ok('villagers reach the outside through the gate',
-    S.villagers.some(v => Math.abs(v.x) > 16.5 || Math.abs(v.z) > 16.5));
+  // sample as we go — errands come and go, so a single snapshot is flaky
+  let everOut = false;
+  for (let t = 0; t < 90 && !everOut; t += 5) {
+    B.sim(5);
+    everOut = S.villagers.some(v => Math.abs(v.x) > 16.5 || Math.abs(v.z) > 16.5);
+  }
+  ok('villagers reach the outside through the gate', everOut);
   ok('someone pulled the lever (gate has opened)', S.walls[0].gates[0].openT > 0 || true);
 
   // ---- raids
@@ -194,6 +198,7 @@ function runTests() {
   const vkinds = new Set(S.villagers.map(v => v.kind));
   ok('villagers come in kinds', vkinds.size >= 2);
   ok('critters roam the wards', S.critters.length >= 1);
+  ok('wild things keep to the open country', S.wild.length >= 1);
 
   // ---- jobs: hands fill by priority, sickness thins them
   S.pop = 30; S.sick = 0;

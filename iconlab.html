@@ -14,6 +14,8 @@
   .icons { display:grid; grid-template-columns:repeat(3, 74px); gap:10px; }
   .cell { width:74px; height:74px; background:#241a0e; border:1px solid #3a2d18; border-radius:9px;
           display:flex; align-items:center; justify-content:center; }
+  /* woodcut is ink on parchment — give it parchment */
+  #A .cell, #Am .cell { background:#d9c9a8; border-color:#a89468; }
   .cell svg { width:52px; height:52px; }
   .cap { text-align:center; font-size:11px; color:#8a7a58; margin-top:10px; }
   .mini { display:flex; gap:5px; justify-content:center; margin-top:12px; }
@@ -63,7 +65,7 @@ const ICONS = {
     A: `<g stroke="${INK}" stroke-width="2.6" fill="none">
         <path d="M8 52 V26 H16 V20 H24 V26 H30 V20 H38 V26 H44 V20 H52 V26 H56 V52 Z"/>
         <path d="M8 38 H56 M22 26 V38 M42 26 V38 M14 38 V52 M32 38 V52 M50 38 V52" stroke-width="1.6"/></g>`,
-    B: `<path d="M8 52 V26 H16 V20 H24 V26 H30 V20 H38 V26 H44 V20 H52 V26 H56 V52 Z" fill="#a8a094" stroke="${INK}" stroke-width="3"/>
+    B: `<path d="M8 52 V26 H16 V20 H24 V26 H30 V20 H38 V26 H44 V20 H52 V26 H56 V52 Z" fill="#cfc8ba" stroke="${INK}" stroke-width="3"/>
         <path d="M8 38 H56" stroke="${INK}" stroke-width="2" opacity=".5"/>`,
     C: `<path d="M8 52 V26 H16 V20 H24 V26 H30 V20 H38 V26 H44 V20 H52 V26 H56 V52 Z" fill="${GOLD}"/>`,
   },
@@ -72,7 +74,7 @@ const ICONS = {
         <path d="M10 52 V24 Q32 8 54 24 V52"/>
         <path d="M18 52 V30 Q32 18 46 30 V52" />
         <path d="M24 32 V52 M32 28 V52 M40 32 V52 M20 40 H44" stroke-width="1.6"/></g>`,
-    B: `<path d="M10 52 V24 Q32 8 54 24 V52 H46 V30 Q32 20 18 30 V52 Z" fill="#8f8778" stroke="${INK}" stroke-width="3"/>
+    B: `<path d="M10 52 V24 Q32 8 54 24 V52 H46 V30 Q32 20 18 30 V52 Z" fill="#c9c0ae" stroke="${INK}" stroke-width="3"/>
         <path d="M24 33 V52 M32 30 V52 M40 33 V52" stroke="${INK}" stroke-width="2.4"/>`,
     C: `<path d="M10 52 V24 Q32 8 54 24 V52 H44 V30 Q32 21 20 30 V52 Z" fill="${GOLD}"/>
         <path d="M27 34 V52 M37 34 V52" stroke="${GOLD}" stroke-width="3"/>`,
@@ -104,7 +106,7 @@ const ICONS = {
         <path d="M22 52 V20 H26 V16 H30 V20 H34 V16 H38 V20 H42 V52 Z"/>
         <path d="M22 34 H42 M28 40 H36 M28 40 V52 H36 V40" stroke-width="1.6"/>
         <path d="M42 22 L54 26 L42 30" /></g>`,
-    B: `<path d="M22 52 V20 H26 V16 H30 V20 H34 V16 H38 V20 H42 V52 Z" fill="#a8a094" stroke="${INK}" stroke-width="3"/>
+    B: `<path d="M22 52 V20 H26 V16 H30 V20 H34 V16 H38 V20 H42 V52 Z" fill="#cfc8ba" stroke="${INK}" stroke-width="3"/>
         <path d="M42 22 L54 26 L42 30 Z" fill="#a3542a" stroke="${INK}" stroke-width="2"/>
         <rect x="28" y="40" width="8" height="12" fill="${INK}"/>`,
     C: `<path d="M22 52 V20 H26 V16 H30 V20 H34 V16 H38 V20 H42 V52 Z" fill="${GOLD}"/>
@@ -116,7 +118,7 @@ const ICONS = {
         <path d="M34 14 L50 30 L44 36 L28 20 Z"/>
         <path d="M16 48 L24 40" stroke-width="4"/></g>`,
     B: `<path d="M18 46 L38 26" stroke="#6e4a2a" stroke-width="6" stroke-linecap="round"/>
-        <path d="M34 14 L50 30 L42 38 L26 22 Z" fill="#8f8778" stroke="${INK}" stroke-width="3"/>`,
+        <path d="M34 14 L50 30 L42 38 L26 22 Z" fill="#c9c0ae" stroke="${INK}" stroke-width="3"/>`,
     C: `<path d="M18 46 L36 28" stroke="${GOLD}" stroke-width="6" stroke-linecap="round"/>
         <path d="M32 14 L50 32 L42 40 L24 22 Z" fill="${GOLD}"/>`,
   },

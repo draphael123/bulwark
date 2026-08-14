@@ -143,6 +143,29 @@ function runTests() {
   for (let i = 0; i < 4; i++) B.paintRoad(40 + i*2, 40);
   ok('roads paint and charge stone', S.roads.length === beforeRoads + 4 && S.stone < stoneR);
 
+  // ---- tiers: palisade burns, breaches, and mends
+  S.wood += 800; S.stone += 500;
+  S.raining = false; S.weatherT = 99999;
+  B.wall([[40,40],[56,40],[56,56],[40,56]], 'palisade');
+  const palWall = S.walls[S.walls.length-1];
+  ok('palisade ring built of wood', palWall.tier === 'palisade');
+  const hov = B.place('hovel', 48, 48);
+  ok('hovel places inside the palisade ward', !!hov && hov.depth >= 1);
+  B.sim(9);
+  B.breachAt(48, 40);   // the deterministic path of what fire does probabilistically
+  ok('a breach opens the palisade', palWall.breached === true);
+  B.step(0.1);
+  ok('a breached ring shelters no one', hov.depth === 0);
+  B.clickWall(48, 40);   // wall tool on a breached wall = repair
+  B.step(0.1);
+  ok('the palisade mends for wood', palWall.breached === false && hov.depth === 1);
+  // ---- mill aura
+  const farmB = S.buildings.find(b => b.type === 'farm' && !b.ruined) || B.place('farm', 44, 30);
+  const millB = B.place('mill', farmB.x - 8, farmB.z + 4);
+  ok('mill places', !!millB);
+  B.sim(9);
+  ok('mill aura reaches the farm', farmB._mill === true);
+
   // ---- telemetry
   const rep = B.teleReport();
   ok('telemetry report has all sections', rep.includes('MILESTONES') && rep.includes('RESOURCE CURVE') && rep.includes('TOOL SELECTIONS'));

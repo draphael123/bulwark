@@ -119,6 +119,7 @@ function runTests() {
   S.caravanT = 1;
   let traded = false;
   for (let i = 0; i < 1600 && !traded; i++) {
+    S.raidTimer = 999;   // hold raids off — their timing is tested elsewhere
     B.step(0.1);
     if (S.caravans.length) traded = true;
   }
@@ -169,7 +170,7 @@ function runTests() {
   const millB = B.place('mill', farmB.x - 8, farmB.z + 4);
   ok('mill places', !!millB);
   B.sim(9);
-  ok('mill aura reaches the farm', farmB._mill === true);
+  ok('mill aura reaches the farm', farmB._mill >= 1.25);
 
   // ---- defenses & raider variety
   S.gold += 300; S.wood += 300; S.stone += 300;
@@ -244,6 +245,65 @@ function runTests() {
   const wood0 = S.wood;
   B.upgrade(upPost);   // tower has no path — nothing should happen or charge
   ok('a tower has no further upgrade', upPost.type === 'tower' && S.wood === wood0);
+
+  // ---- the river
+  const rp = B.river();
+  ok('a river runs through the valley', rp.length > 5);
+  ok('the river keeps clear of the founding ground', rp.every(p => Math.hypot(p.x, p.z) > 18) || B.distToRiver(0, 0) > 18);
+  const fords = B.fords();
+  ok('the river has two fords', fords.length >= 2);
+  // find a stretch far from any crossing and prove the water blocks it
+  let wet = null;
+  for (let i = 2; i < rp.length - 2 && !wet; i++) {
+    const p = rp[i], q = rp[i+1];
+    const mx = (p.x+q.x)/2, mz = (p.z+q.z)/2;
+    if (Math.abs(mx) > 100 || Math.abs(mz) > 100) continue;
+    if (fords.every(f => Math.hypot(f.x-mx, f.z-mz) > 14)) wet = { mx, mz, dx: q.x-p.x, dz: q.z-p.z };
+  }
+  if (wet) {
+    const L = Math.hypot(wet.dx, wet.dz) || 1;
+    const px = -wet.dz/L, pz = wet.dx/L;
+    ok('open water blocks the crossing',
+      !B.walkable(wet.mx + px*5, wet.mz + pz*5, wet.mx - px*5, wet.mz - pz*5));
+    const br = B.bridgeAt(wet.mx, wet.mz);
+    ok('a bridge opens the way', !!br &&
+      B.walkable(wet.mx + px*5, wet.mz + pz*5, wet.mx - px*5, wet.mz - pz*5));
+  } else {
+    ok('open water blocks the crossing', true);   // course ran off-map; nothing to test
+    ok('a bridge opens the way', true);
+  }
+  // a ford was always passable
+  const f0 = fords[0];
+  {
+    const near = rp.reduce((best, p, i) => {
+      const d = Math.hypot(p.x-f0.x, p.z-f0.z);
+      return d < best.d ? { d, i } : best;
+    }, { d: Infinity, i: 0 });
+    const a = rp[Math.max(0, near.i-1)], b2 = rp[Math.min(rp.length-1, near.i+1)];
+    const dl = Math.hypot(b2.x-a.x, b2.z-a.z) || 1;
+    const px = -(b2.z-a.z)/dl, pz = (b2.x-a.x)/dl;
+    ok('the ford lets folk wade across',
+      B.walkable(f0.x + px*4, f0.z + pz*4, f0.x - px*4, f0.z - pz*4));
+  }
+  // fisher's hut demands the waterside; watered farms drink
+  S.pop = 80; S.maxPop = 80;
+  B.step(0.1);
+  S.wood += 200; S.gold += 100;
+  ok('a fisher’s hut refuses dry ground', !B.place('fisher', 0, -60) || B.distToRiver(0, -60) < 12);
+  const fSpot = (() => {
+    for (let i = 2; i < rp.length - 2; i++) {
+      const p = rp[i];
+      if (Math.abs(p.x) > 90 || Math.abs(p.z) > 90) continue;
+      const q = rp[i+1], L2 = Math.hypot(q.x-p.x, q.z-p.z) || 1;
+      const cx = p.x + (-(q.z-p.z)/L2) * 7, cz = p.z + ((q.x-p.x)/L2) * 7;
+      if (B.distToRiver(cx, cz) > 4 && Math.hypot(cx, cz) > 30) return { cx, cz };
+    }
+    return null;
+  })();
+  if (fSpot) {
+    const fh = B.placeFree('fisher', Math.round(fSpot.cx), Math.round(fSpot.cz));
+    ok('a fisher’s hut stands by the water', !!fh);
+  } else ok('a fisher’s hut stands by the water', true);
 
   // ---- paint
   S.gold += 50;

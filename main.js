@@ -32,6 +32,7 @@ const BUILD_DEFS = {
   sawmill:    { nm:'Sawmill',    w:3,  d:3,  hp:70,  cost:{wood:30, gold:10},   auraR:16 },
   quarry:     { nm:'Quarry',     w:4,  d:4,  hp:80,  cost:{wood:25, gold:15},   stonePerDay:8, needsRocks:2 },
   tradepost:  { nm:'Trade Post', w:3,  d:3,  hp:60,  cost:{wood:25, gold:20} },
+  fisher:     { nm:"Fisher's Hut", w:2, d:2, hp:50,  cost:{wood:20, gold:10},   foodPerDay:7, needsWater:true },
   stakes:     { nm:'Stakes',     w:2,  d:2,  hp:30,  cost:{wood:8},             stakeDps:6 },
   watchpost:  { nm:'Watch Post', w:2,  d:2,  hp:70,  cost:{wood:15, stone:10},  range:14, dps:6 },
   tower:      { nm:'Arrow Tower',w:2,  d:2,  hp:120, cost:{wood:20, stone:30},  range:24, dps:11 },
@@ -63,10 +64,10 @@ const BUILD_DEFS = {
 // the palette is tabbed by trade; digits pick within the open tab
 const TABS = [
   { id:'wallTab',  nm:'WALLS',  tools:['palisade','wall','highwall','woodgate','gate','greatgate'] },
-  { id:'roadTab',  nm:'ROADS',  tools:['dirtroad','road','flagroad'] },
+  { id:'roadTab',  nm:'ROADS',  tools:['dirtroad','road','flagroad','bridge'] },
   { id:'townTab',  nm:'TOWN',   tools:['hovel','house','longhouse','rowhouse','townhouse','well','granary','greatstore','market'] },
   { id:'civicTab', nm:'CIVIC',  tools:['tavern','chapel','infirmary','bathhouse','school','townhall'] },
-  { id:'workTab',  nm:'WORKS',  tools:['farm','orchard','mill','woodcutter','sawmill','quarry','tradepost'] },
+  { id:'workTab',  nm:'WORKS',  tools:['farm','orchard','fisher','mill','woodcutter','sawmill','quarry','tradepost'] },
   { id:'guardTab', nm:'GUARD',  tools:['stakes','watchpost','beacon','hoardings','moat','tower','ballista','barracks'] },
   { id:'decorTab', nm:'DECOR',  tools:['paint','fence','planttree','garden','maypole','shrine','stall','graveyard'] },
   { id:'propsTab', nm:'PROPS',  tools:['fountain','statue','bannerpole','woodpile','cart','signpost','lamppost','beehives'] },
@@ -100,13 +101,13 @@ const isGateTool = t => !!GATE_TIERS[t];
 const isRoadTool = t => !!ROAD_TIERS[t];
 const TOOL_NAME = t => (BUILD_DEFS[t] && BUILD_DEFS[t].nm) || (WALL_TIERS[t] && WALL_TIERS[t].nm)
   || (GATE_TIERS[t] && GATE_TIERS[t].nm) || (ROAD_TIERS[t] && ROAD_TIERS[t].nm)
-  || (t === 'hoardings' ? 'Hoardings' : t === 'paint' ? 'Paint' : t);
+  || (t === 'hoardings' ? 'Hoardings' : t === 'paint' ? 'Paint' : t === 'bridge' ? 'Bridge' : t);
 const GATE_COST = 10; // stone, for the Gate tool
 
 // ---------------------------------------------------------------- state
 const RANKS = [
-  { pop: 0,  nm: 'Hamlet',  unlocks: ['palisade','wall','woodgate','dirtroad','road','hovel','house','farm','woodcutter','demolish','woodpile','signpost','paint','fence','planttree'] },
-  { pop: 12, nm: 'Village', unlocks: ['gate','well','granary','quarry','mill','sawmill','tavern','watchpost','stakes','orchard','beacon','longhouse','cart','lamppost','maypole','shrine','stall','beehives','graveyard'] },
+  { pop: 0,  nm: 'Hamlet',  unlocks: ['palisade','wall','woodgate','dirtroad','road','hovel','house','farm','woodcutter','demolish','woodpile','signpost','paint','fence','planttree','bridge'] },
+  { pop: 12, nm: 'Village', unlocks: ['gate','well','granary','quarry','mill','sawmill','tavern','watchpost','stakes','orchard','beacon','longhouse','cart','lamppost','maypole','shrine','stall','beehives','graveyard','fisher'] },
   { pop: 20, nm: 'Town',    unlocks: ['highwall','flagroad','market','chapel','tower','tradepost','fountain','garden','hoardings','moat','infirmary','bathhouse','school','rowhouse','townhouse'] },
   { pop: 32, nm: 'City',    unlocks: ['greatgate','greatstore','barracks','statue','bannerpole','ballista','townhall'] },
 ];
@@ -142,7 +143,7 @@ const state = {
   townName:'', pop:6, maxPop:6, rankIdx:0, time:0, day:1,
   buildings:[],       // {type,x,z,hp,maxHp,depth,ruined,group,hitFlash}
   walls:[],           // {poly, path, closed, gates, group}
-  bandits:[], guards:[], arrows:[], villagers:[], caravans:[], critters:[], wild:[], roads:[],
+  bandits:[], guards:[], arrows:[], villagers:[], caravans:[], critters:[], wild:[], roads:[], bridges:[],
   difficulty:'standard',
   fireCool:150, caravanT:45, upgCool:0,
   raidTimer:150, raidEdge:null, raidNum:0,
@@ -343,6 +344,114 @@ scene.add(patchMesh);
 const _regionTint = new THREE.Color(0xffffff);
 const MOSS_M = new THREE.MeshLambertMaterial({ color:0x55643a });
 const TURF_M = new THREE.MeshLambertMaterial({ color:0x687c3e });
+
+// ---------------------------------------------------------------- the river
+// every valley is cut by a seeded river. It blocks all movement except at
+// its fords and the bridges the player builds — a free wall, with gaps.
+const RIVER_W = 5;
+let riverPts = [], riverBlockers = [], riverCross = [], riverFords = [];
+const _rq = new THREE.Quaternion(), _rm4 = new THREE.Matrix4(), _rs = new THREE.Vector3();
+function distToSegR(px, pz, ax, az, bx, bz) {
+  const dx = bx-ax, dz = bz-az;
+  const L2 = dx*dx + dz*dz;
+  const t = L2 ? Math.max(0, Math.min(1, ((px-ax)*dx + (pz-az)*dz) / L2)) : 0;
+  return Math.hypot(px - (ax + dx*t), pz - (az + dz*t));
+}
+function distToRiver(x, z) {
+  let best = Infinity;
+  for (let i = 0; i < riverPts.length - 1; i++)
+    best = Math.min(best, distToSegR(x, z, riverPts[i].x, riverPts[i].z, riverPts[i+1].x, riverPts[i+1].z));
+  return best;
+}
+function nearWater(x, z, r) {
+  if (distToRiver(x, z) < r + RIVER_W/2) return true;
+  if (Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.r + r) return true;
+  for (const [key, tk] of roadSet) {
+    if (!(ROAD_TIERS[tk] && ROAD_TIERS[tk].moat)) continue;
+    const [gx, gz] = key.split(',').map(Number);
+    if (Math.hypot(x - gx, z - gz) < r) return true;
+  }
+  return false;
+}
+function buildRiverCourse(rand) {
+  riverPts = [];
+  riverFords = [];
+  // a line across the whole map, pushed off-centre so the founding ground
+  // near (0,0) always stays dry
+  const a0 = rand() * Math.PI * 2;
+  const dirX = Math.sin(a0), dirZ = Math.cos(a0);
+  const perpX = -dirZ, perpZ = dirX;
+  const off = (26 + rand() * 34) * (rand() < 0.5 ? -1 : 1);
+  const R = MAP + 34;
+  const N = 22;
+  for (let i = 0; i <= N; i++) {
+    const t = (i / N) * 2 - 1;
+    const wob = Math.sin(t * 5.2 + a0 * 7) * 7 + Math.sin(t * 11 + a0 * 3) * 3.5;
+    riverPts.push({
+      x: dirX * t * R + perpX * (off + wob),
+      z: dirZ * t * R + perpZ * (off + wob),
+    });
+  }
+  // two natural fords, spaced along the run
+  for (const t of [0.28 + rand() * 0.12, 0.62 + rand() * 0.12]) {
+    const i = Math.round(t * N);
+    riverFords.push({ x: riverPts[i].x, z: riverPts[i].z });
+  }
+  rebuildRiverPaths();
+}
+// bridges: the player's answer to the river
+const BRIDGE_COST = 25;
+function makeBridgeMesh(p) {
+  const g = new THREE.Group();
+  const W = RIVER_W + 2.8;
+  g.add(box(2.4, 0.16, W, MAT.timber, 0, 0.34, 0));
+  const r1 = box(2.4, 0.14, 1.4, MAT.timber, 0, 0.18, W/2 + 0.55); r1.rotation.x = 0.22; g.add(r1);
+  const r2 = box(2.4, 0.14, 1.4, MAT.timber, 0, 0.18, -W/2 - 0.55); r2.rotation.x = -0.22; g.add(r2);
+  for (const sx of [-1.05, 1.05]) {
+    for (let k = 0; k <= 4; k++) g.add(cyl(0.06, 0.07, 0.55, MAT.timber, sx, 0.6, -W/2 + k*(W/4), 4));
+    g.add(box(0.07, 0.06, W, MAT.timber, sx, 0.84, 0));
+  }
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  g.position.set(p.x, 0, p.z);
+  g.rotation.y = p.ang + Math.PI/2;   // deck crosses the flow
+  return g;
+}
+function placeBridgeAt(x, z, free = false) {
+  let best = null, bd = Infinity;
+  for (let i = 0; i < riverPts.length - 1; i++) {
+    const a = riverPts[i], b = riverPts[i+1];
+    const dx = b.x-a.x, dz = b.z-a.z, L2 = dx*dx + dz*dz;
+    const t = L2 ? Math.max(0, Math.min(1, ((x-a.x)*dx + (z-a.z)*dz)/L2)) : 0;
+    const px = a.x + dx*t, pz = a.z + dz*t;
+    const d = Math.hypot(x-px, z-pz);
+    if (d < bd) { bd = d; best = { x:px, z:pz, ang: Math.atan2(dx, dz) }; }
+  }
+  if (!best || bd > 7) { if (!free) msg('Bridges are built on the river.', 'warn'); return null; }
+  if (Math.abs(best.x) > MAP+8 || Math.abs(best.z) > MAP+8) { if (!free) msg('Too far downstream.', 'warn'); return null; }
+  if (riverCross.some(c => Math.hypot(c.x-best.x, c.z-best.z) < 8)) { if (!free) msg('There is already a crossing here.', 'warn'); return null; }
+  if (!free) {
+    if (state.wood < BRIDGE_COST) { msg(`A bridge costs ${BRIDGE_COST} wood.`, 'warn'); return null; }
+    state.wood -= BRIDGE_COST;
+  }
+  const br = { x: best.x, z: best.z, ang: best.ang, grp: makeBridgeMesh(best) };
+  scene.add(br.grp);
+  state.bridges.push(br);
+  rebuildRiverPaths();
+  if (!free) { AudioSys.play('thunk'); msg('A bridge spans the water.', 'good'); teleEv('bridge'); saveGame(); }
+  return br;
+}
+
+// blockers span the river EXCEPT where a ford or bridge opens a gap
+function rebuildRiverPaths() {
+  riverBlockers = [];
+  riverCross = [...riverFords, ...(state.bridges || []).map(b => ({ x: b.x, z: b.z }))];
+  const GAP = 4.5;
+  for (let i = 0; i < riverPts.length - 1; i++) {
+    const a = riverPts[i], b = riverPts[i+1];
+    const nearGap = riverCross.some(c => distToSegR(c.x, c.z, a.x, a.z, b.x, b.z) < GAP);
+    if (!nearGap) riverBlockers.push({ ax: a.x, az: a.z, bx: b.x, bz: b.z });
+  }
+}
 // planted trees share one crown material so the seasons can tint them
 const PLANT_LEAF_M = new THREE.MeshLambertMaterial({ color:0x4f7a38 });
 const _plantBase = new THREE.Color(0x4f7a38);
@@ -637,6 +746,69 @@ function scatterWorld(seed, cfg) {
   rocks.length = 0;
   _seed = seed;
   const addWorld = (...ms) => { for (const m of ms) { scene.add(m); worldMeshes.push(m); } };
+  // the river is cut FIRST — everything else keeps its feet dry
+  buildRiverCourse(srand);
+  {
+    // water ribbon
+    const n = riverPts.length;
+    const pos = new Float32Array(n * 2 * 3);
+    const idx = [];
+    for (let i = 0; i < n; i++) {
+      const a = riverPts[Math.max(0, i-1)], b = riverPts[Math.min(n-1, i+1)];
+      const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz) || 1;
+      const px = -dz/L * RIVER_W/2, pz = dx/L * RIVER_W/2;
+      pos.set([riverPts[i].x + px, 0.05, riverPts[i].z + pz], i*6);
+      pos.set([riverPts[i].x - px, 0.05, riverPts[i].z - pz], i*6 + 3);
+      if (i < n-1) idx.push(i*2, i*2+1, i*2+2, i*2+1, i*2+3, i*2+2);
+    }
+    const rg = new THREE.BufferGeometry();
+    rg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    rg.setIndex(idx);
+    rg.computeVertexNormals();
+    const riverMesh = new THREE.Mesh(rg, new THREE.MeshLambertMaterial({
+      color:0x3d6f8e, transparent:true, opacity:0.92, depthWrite:false, side:THREE.DoubleSide }));
+    riverMesh.renderOrder = 2;
+    addWorld(riverMesh);
+    // stony banks
+    const bankG = new THREE.DodecahedronGeometry(0.45, 0);
+    const BN = Math.min(120, n * 6);
+    const bankI = new THREE.InstancedMesh(bankG, new THREE.MeshLambertMaterial({ color:0x8b8b86 }), BN);
+    let bi = 0;
+    for (let i = 0; i < n-1 && bi < BN; i++) {
+      const a = riverPts[i], b = riverPts[i+1];
+      const dx = b.x-a.x, dz = b.z-a.z, L = Math.hypot(dx, dz) || 1;
+      for (let k = 0; k < 3 && bi < BN; k++) {
+        const t = srand(), side = srand() < 0.5 ? 1 : -1;
+        const x = a.x + dx*t + (-dz/L) * side * (RIVER_W/2 + 0.4 + srand()*0.8);
+        const z = a.z + dz*t + (dx/L) * side * (RIVER_W/2 + 0.4 + srand()*0.8);
+        if (Math.abs(x) > MAP+30 || Math.abs(z) > MAP+30) continue;
+        const sc = 0.4 + srand()*0.8;
+        _rq.setFromEuler(new THREE.Euler(srand(), srand()*6.28, srand()));
+        _rm4.compose(new THREE.Vector3(x, groundY(x, z) + 0.1, z), _rq, _rs.set(sc, sc*0.6, sc));
+        bankI.setMatrixAt(bi++, _rm4);
+      }
+    }
+    bankI.count = bi;
+    addWorld(bankI);
+    // stepping stones mark the fords
+    for (const f of riverFords) {
+      if (Math.abs(f.x) > MAP+20 || Math.abs(f.z) > MAP+20) continue;
+      const shallow = new THREE.Mesh(new THREE.CircleGeometry(4.2, 12),
+        new THREE.MeshLambertMaterial({ color:0x7ca9c0, transparent:true, opacity:0.85, depthWrite:false }));
+      shallow.rotation.x = -Math.PI/2;
+      shallow.position.set(f.x, 0.06, f.z);
+      shallow.renderOrder = 3;
+      addWorld(shallow);
+      for (let k = 0; k < 5; k++) {
+        const st = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5, 0), MAT.stoneD);
+        st.position.set(f.x + (srand()-0.5)*4.5, 0.12, f.z + (srand()-0.5)*4.5);
+        st.scale.y = 0.35;
+        st.rotation.y = srand()*6.28;
+        addWorld(st);
+      }
+    }
+  }
+  const dryLand = (x, z, m = 1) => distToRiver(x, z) > RIVER_W/2 + m;
   // tree clusters in a rough ring; rocks in a few clumps
   const trunkG = new THREE.CylinderGeometry(0.35, 0.5, 2.4, 6);
   const pineG  = new THREE.ConeGeometry(2.0, 4.4, 7);
@@ -661,6 +833,7 @@ function scatterWorld(seed, cfg) {
     const x = c.x + (srand()-0.5)*26, z = c.z + (srand()-0.5)*26;
     if (Math.abs(x) > MAP-3 || Math.abs(z) > MAP-3) continue;
     if (Math.hypot(x,z) < 30) continue;
+    if (!dryLand(x, z, 1.2)) continue;
     const sc = 0.8 + srand()*0.6;
     const broadleaf = srand() < (cfg.broadleaf || 0.38);
     q.setFromEuler(new THREE.Euler(0, srand()*Math.PI*2, 0));
@@ -697,7 +870,8 @@ function scatterWorld(seed, cfg) {
   }
   for (let i=0;i<RN;i++){
     const c = rclusters[i % rclusters.length];
-    const x = c.x + (srand()-0.5)*14, z = c.z + (srand()-0.5)*14;
+    let x = c.x + (srand()-0.5)*14, z = c.z + (srand()-0.5)*14;
+    if (!dryLand(x, z, 0.5)) { x += 20; z += 20; }   // shove strays off the water
     const sc = 0.6 + srand()*0.9;
     q.setFromEuler(new THREE.Euler(srand(), srand()*Math.PI*2, srand()*0.4));
     m4.compose(new THREE.Vector3(x, 0.5*sc, z), q, new THREE.Vector3(sc, sc*0.7, sc));
@@ -713,7 +887,8 @@ function scatterWorld(seed, cfg) {
   const TN = 700;
   const tuftI = new THREE.InstancedMesh(tuftG, new THREE.MeshLambertMaterial({ color:0xffffff }), TN);
   for (let i=0;i<TN;i++){
-    const x = (srand()-0.5)*2*(MAP+25), z = (srand()-0.5)*2*(MAP+25);
+    let x = (srand()-0.5)*2*(MAP+25), z = (srand()-0.5)*2*(MAP+25);
+    for (let tr = 0; tr < 4 && !dryLand(x, z, 0.3); tr++) { x = (srand()-0.5)*2*(MAP+25); z = (srand()-0.5)*2*(MAP+25); }
     const sc = 0.6 + srand()*0.9;
     q.setFromEuler(new THREE.Euler((srand()-0.5)*0.3, srand()*Math.PI, (srand()-0.5)*0.3));
     m4.compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(sc, sc, sc));
@@ -727,7 +902,8 @@ function scatterWorld(seed, cfg) {
   const flwI = new THREE.InstancedMesh(flwG, new THREE.MeshLambertMaterial({ color:0xffffff }), FN);
   const flwCols = [0xfff1c9, 0xf2d24b, 0xd96a6a, 0xc9a3e8];
   for (let i=0;i<FN;i++){
-    const x = (srand()-0.5)*2*(MAP+20), z = (srand()-0.5)*2*(MAP+20);
+    let x = (srand()-0.5)*2*(MAP+20), z = (srand()-0.5)*2*(MAP+20);
+    for (let tr = 0; tr < 4 && !dryLand(x, z, 0.3); tr++) { x = (srand()-0.5)*2*(MAP+20); z = (srand()-0.5)*2*(MAP+20); }
     m4.compose(new THREE.Vector3(x, 0.18, z), q.identity(), new THREE.Vector3(1,1,1));
     flwI.setMatrixAt(i, m4);
     flwI.setColorAt(i, col.setHex(flwCols[(srand()*flwCols.length)|0]));
@@ -811,7 +987,7 @@ function scatterWorld(seed, cfg) {
   do {
     const a = srand()*Math.PI*2, r = 58 + srand()*30;
     lx = Math.sin(a)*r; lz = Math.cos(a)*r;
-  } while (Math.hypot(lx-LAKE.x, lz-LAKE.z) < LAKE.r + 24 && tries++ < 20);
+  } while ((Math.hypot(lx-LAKE.x, lz-LAKE.z) < LAKE.r + 24 || !dryLand(lx, lz, 9)) && tries++ < 20);
   if (cfg.landmark === 'stones') {
     // a ring of standing stones, one long since fallen
     for (let i = 0; i < 7; i++) {
@@ -1546,6 +1722,24 @@ function buildMesh(type, bx = 0, bz = 0) {
       g.add(cap);
     }
     g.add(new THREE.Mesh(new THREE.SphereGeometry(0.08, 5, 4), new THREE.MeshLambertMaterial({ color:0xf2d24b })).translateX(-0.8).translateY(0.1).translateZ(0.75));
+  } else if (type === 'fisher') {
+    g.add(box(1.7, 1.4, 1.6, MAT.timber, -0.2, 0.7, 0));
+    const r = new THREE.Mesh(prismGeo(2.1, 0.9, 2.0), MAT.roofD);
+    r.position.set(-0.2, 1.4, 0); r.castShadow = true; g.add(r);
+    g.add(box(0.5, 0.9, 0.08, MAT.ruin, 0, 0.45, 0.83));
+    // drying rack hung with the day's catch
+    for (const px of [0.85, 1.5]) g.add(cyl(0.05, 0.06, 1.3, MAT.timber, px, 0.65, 0.5, 4));
+    g.add(box(0.85, 0.05, 0.05, MAT.timber, 1.17, 1.25, 0.5));
+    const fishM = new THREE.MeshLambertMaterial({ color:0xa9b8c0 });
+    for (const px of [0.95, 1.18, 1.4]) {
+      const f = new THREE.Mesh(new THREE.SphereGeometry(0.09, 5, 4), fishM);
+      f.position.set(px, 1.05, 0.5); f.scale.set(0.6, 1.6, 0.5); g.add(f);
+    }
+    // a rod against the wall and a coil of net
+    const rod = cyl(0.025, 0.025, 1.6, MAT.timber, -1.0, 0.8, 0.7, 4);
+    rod.rotation.z = 0.35; g.add(rod);
+    g.add(cyl(0.28, 0.32, 0.14, new THREE.MeshLambertMaterial({ color:0x8a7a58 }), 0.7, 0.08, -0.6, 8));
+    g.rotation.y = ((vh*16)|0) % 4 * Math.PI/2;
   } else if (type === 'stakes') {
     for (const [px, pz, tilt] of [[-0.6,-0.5,0.5],[0.3,-0.6,-0.4],[0.7,0.3,0.5],[-0.3,0.6,-0.5],[0,0,0.2]]) {
       const st = cyl(0.02, 0.12, 1.5, MAT.timber, px, 0.6, pz, 5);
@@ -2267,6 +2461,7 @@ function wildSpawnSpot() {
     if (Math.abs(x) > MAP-4 || Math.abs(z) > MAP-4) continue;
     if (wardDepth(x, z) > 0) continue;
     if (Math.hypot(x-LAKE.x, z-LAKE.z) < LAKE.r + 4) continue;
+    if (distToRiver(x, z) < RIVER_W/2 + 2) continue;
     if (state.buildings.some(b => Math.hypot(b.x-x, b.z-z) < 18)) continue;
     return { x, z };
   }
@@ -2625,6 +2820,9 @@ function canWalk(ax, az, bx, bz) {
   for (const w of state.walls)
     for (const s of (w.blockers || []))
       if (segsCross(ax,az,bx,bz, s.ax,s.az,s.bx,s.bz)) return false;
+  // the river is a wall the land built itself
+  for (const s of riverBlockers)
+    if (segsCross(ax,az,bx,bz, s.ax,s.az,s.bx,s.bz)) return false;
   return true;
 }
 function gateWorld(w, g) {
@@ -2679,6 +2877,7 @@ function findPath(ax, az, bx, bz) {
   if (canWalk(ax, az, bx, bz)) return [{x:bx, z:bz}];
   const nodes = [{x:ax, z:az}];
   for (const w of state.walls) for (const g of (w.gatePts || [])) nodes.push(g);
+  for (const c of riverCross) nodes.push(c);   // fords and bridges
   nodes.push({x:bx, z:bz});
   const N = nodes.length;
   const dist = Array(N).fill(Infinity), prev = Array(N).fill(-1), used = Array(N).fill(false);
@@ -2966,6 +3165,8 @@ function placementCheck(type, x, z) {
   if (lockRank) return { ok:false, why:`${def.nm}s unlock at ${lockRank.pop} folk` };
   if (type === 'keep' && state.buildings.some(b => b.type === 'keep')) return { ok:false, why:'The town already has its Keep' };
   if (def.needsWard && wardDepth(x, z) === 0) return { ok:false, why:`A ${def.nm.toLowerCase()} must stand inside walls — raise the ward first` };
+  if (distToRiver(x, z) < RIVER_W/2 + Math.max(def.w, def.d)/2 + 0.3) return { ok:false, why:'That ground is under the river' };
+  if (def.needsWater && !nearWater(x, z, 7)) return { ok:false, why:`A ${def.nm.toLowerCase()} must stand by the water — river, lake or moat` };
   if (overlapsBuilding(x, z, def.w, def.d)) return { ok:false, why:'Blocked by a building' };
   if (nearWall(x, z, Math.max(def.w, def.d)/2 + 1.2)) return { ok:false, why:'Too close to a wall' };
   if (def.needsTrees && countNear(trees, x, z, 15) < def.needsTrees) return { ok:false, why:`Needs ${def.needsTrees}+ trees within reach` };
@@ -3502,6 +3703,8 @@ function updateObjectives(silent=false) {
 
 const TOOL_HINTS = {
   paint: 'Click any finished building to paint its roof. Keep clicking to cycle the dyes; the last click strips it bare again.',
+  bridge: 'Click the river to throw a bridge across it. Folk, carts — and raiders — cross only at bridges and fords.',
+  fisher: 'Must stand by water — the river, the lake, or a dug moat. Watered farms nearby also grow ×1.25.',
   wall: 'Click corners on the ground; click your first post (or press Enter) to close the ring. Start on an existing wall to join it.',
   gate: 'Click anywhere on a wall to cut a gate through it.',
   road: 'Click or drag across the ground to lay cobbles. Folk and caravans travel faster on roads.',
@@ -3518,6 +3721,7 @@ function toolCostStr(t) {
   if (ROAD_TIERS[t]) return `${resSVG(ROAD_TIERS[t].res, 11)}${ROAD_TIERS[t].cost}/u`;
   if (t === 'hoardings') return `${resSVG('wood', 11)}${HOARDING_COST}/wall`;
   if (t === 'paint') return `${resSVG('gold', 11)}3/coat`;
+  if (t === 'bridge') return `${resSVG('wood', 11)}${BRIDGE_COST}`;
   if (t === 'demolish') return 'refund ½';
   return costStr(BUILD_DEFS[t].cost);
 }
@@ -3527,6 +3731,7 @@ function canAffordTool(t) {
   if (ROAD_TIERS[t]) return state[ROAD_TIERS[t].res] >= ROAD_TIERS[t].cost;
   if (t === 'hoardings') return state.wood >= HOARDING_COST;
   if (t === 'paint') return state.gold >= 3;
+  if (t === 'bridge') return state.wood >= BRIDGE_COST;
   if (BUILD_DEFS[t]) return canAfford(BUILD_DEFS[t].cost);
   return true;
 }
@@ -3588,7 +3793,9 @@ function buildingInfoHTML(b) {
     if (b.type === 'townhouse' && b.depth >= 2 && b._well && b._mkt && (b._tav || b._chap)) html += `\n<span class="safe">↑ will grow into a MANOR</span>`;
   }
   if (!b.ruined && def.storage) html += `\n+${def.storage} food storage (town total ${foodCap()})`;
-  if (!b.ruined && b.type === 'farm') html += `\n${seasonOf(state.day).nm}: ×${seasonOf(state.day).farm}${b._mill ? ' · mill ×1.25' : ''}${state.raining ? ' · rain ×1.25' : ''}`;
+  if (!b.ruined && b.type === 'farm') html += `\n${seasonOf(state.day).nm}: ×${seasonOf(state.day).farm}${b._mill ? ` · mill ×${b._mill}` : ''}${b._wet ? ' · watered ×1.25' : ''}${state.raining ? ' · rain ×1.25' : ''}`;
+  if (!b.ruined && b.type === 'orchard' && b._wet) html += `\nwatered ×1.25`;
+  if (!b.ruined && b.type === 'fisher') html += `\n${BUILD_DEFS.fisher.foodPerDay} food/day from the water — half through the ice of winter`;
   if (!b.ruined && b.type === 'woodcutter' && b._saw) html += `\nsawmill ×1.25`;
   if (!b.ruined && b.type === 'well') html += `\nwaters houses within ${def.coverR} — and fights fires`;
   if (!b.ruined && (b.type === 'mill' || b.type === 'sawmill')) html += `\nboosts ${b.type === 'mill' ? 'farms' : 'woodcutters'} within ${def.auraR}`;
@@ -3713,8 +3920,9 @@ function foodRate() { // per day
   const seas = seasonOf(state.day);
   for (const b of state.buildings) {
     if (b.ruined || b.buildT < 1) continue;
-    if (b.type === 'farm') r += BUILD_DEFS.farm.foodPerDay * seas.farm * (b._mill ? 1.25 : 1) * staffEff(b);
-    else if (b.type === 'orchard') r += BUILD_DEFS.orchard.foodPerDay * (seas.nm === 'Winter' ? 0.5 : 1) * staffEff(b);
+    if (b.type === 'farm') r += BUILD_DEFS.farm.foodPerDay * seas.farm * (b._mill || 1) * (b._wet ? 1.25 : 1) * staffEff(b);
+    else if (b.type === 'orchard') r += BUILD_DEFS.orchard.foodPerDay * (b._wet ? 1.25 : 1) * (seas.nm === 'Winter' ? 0.5 : 1) * staffEff(b);
+    else if (b.type === 'fisher') r += BUILD_DEFS.fisher.foodPerDay * (seas.nm === 'Winter' ? 0.5 : 1) * staffEff(b);
   }
   return r - state.pop * 0.5;
 }
@@ -3731,13 +3939,23 @@ function coveredByBuilt(b, type, r) {
 function refreshCoverage() {
   refreshJobs();   // services only cover when someone staffs them
   for (const b of state.buildings) {
-    if (b.ruined) { b._well = b._mkt = b._tav = b._chap = b._fnt = b._mill = b._saw = false; continue; }
+    if (b.ruined) { b._well = b._mkt = b._tav = b._chap = b._fnt = b._mill = b._saw = b._wet = false; continue; }
     b._well = coveredByBuilt(b, 'well', BUILD_DEFS.well.coverR);
     b._mkt  = coveredByBuilt(b, 'market', BUILD_DEFS.market.boostR);
     b._tav  = coveredByBuilt(b, 'tavern', BUILD_DEFS.tavern.boostR);
     b._chap = coveredByBuilt(b, 'chapel', BUILD_DEFS.chapel.boostR);
     b._fnt  = coveredByBuilt(b, 'fountain', BUILD_DEFS.fountain.boostR);
-    b._mill = b.type === 'farm' && coveredByBuilt(b, 'mill', BUILD_DEFS.mill.auraR);
+    // mills grind harder when the wheel turns in a current
+    b._mill = 0;
+    if (b.type === 'farm') {
+      for (const o of state.buildings) {
+        if (o.ruined || o.buildT < 1 || o.type !== 'mill' || (o.workers || 0) <= 0) continue;
+        if (Math.hypot(o.x-b.x, o.z-b.z) <= BUILD_DEFS.mill.auraR)
+          b._mill = Math.max(b._mill, nearWater(o.x, o.z, 5) ? 1.4 : 1.25);
+      }
+    }
+    // watered fields drink from river, lake, moat or canal
+    b._wet = (b.type === 'farm' || b.type === 'orchard') && nearWater(b.x, b.z, 7);
     b._saw  = b.type === 'woodcutter' && coveredByBuilt(b, 'sawmill', BUILD_DEFS.sawmill.auraR);
     // high walls and street frontage lend prestige to homes
     b._high = false;
@@ -3752,10 +3970,10 @@ function refreshCoverage() {
 // production and services need hands: workforce ≈ 70% of the well,
 // auto-assigned by priority. Understaffed buildings run proportionally slower.
 const JOB_SLOTS = {
-  farm:2, orchard:1, woodcutter:1, sawmill:1, quarry:2, mill:1,
+  farm:2, orchard:1, fisher:1, woodcutter:1, sawmill:1, quarry:2, mill:1,
   market:2, tavern:1, tradepost:1, infirmary:1, bathhouse:1, school:1, chapel:1, townhall:1,
 };
-const JOB_PRIORITY = ['farm','orchard','woodcutter','quarry','mill','sawmill','market',
+const JOB_PRIORITY = ['farm','orchard','fisher','woodcutter','quarry','mill','sawmill','market',
   'tavern','infirmary','bathhouse','school','chapel','tradepost','townhall'];
 function workforce() {
   const schooled = state.buildings.some(b => !b.ruined && b.buildT >= 1 && b.type === 'school' && b.workers > 0);
@@ -4189,11 +4407,13 @@ function caravanTick(dt) {
       const m = markets[Math.random()*markets.length|0];
       gatesAll.sort((a,b2) => Math.hypot(a.x-m.x,a.z-m.z) - Math.hypot(b2.x-m.x,b2.z-m.z));
       const gate = gatesAll[0];
+      // the river may lie between the road and the gate — route via fords/bridges
+      const route = findPath(sx, sz, gate.x, gate.z) || [{x:gate.x, z:gate.z}];
       const grp = makeCaravan();
       grp.position.set(sx, 0, sz);
       scene.add(grp);
       state.caravans.push({ x:sx, z:sz, speed:4.5, grp, bob:Math.random()*6,
-        wps:[{x:gate.x, z:gate.z}, {x:m.x+3.5, z:m.z+3.5}], i:0, phase:'in', tradeT:4,
+        wps:[...route, {x:m.x+3.5, z:m.z+3.5}], i:0, phase:'in', tradeT:4,
         exit:{x:sx, z:sz}, gate:{x:gate.x, z:gate.z} });
     }
   }
@@ -4244,8 +4464,9 @@ function economyTick(dt) {
   const housesInside = [];
   for (const b of state.buildings) {
     if (b.ruined || b.buildT < 1) continue;   // under construction = not yet working
-    if (b.type === 'farm') state.food += BUILD_DEFS.farm.foodPerDay * staffEff(b) * (b._mill ? 1.25 : 1) * seasonOf(state.day).farm * (state.raining ? 1.25 : 1) * perDay;
-    else if (b.type === 'orchard') state.food += BUILD_DEFS.orchard.foodPerDay * staffEff(b) * (seasonOf(state.day).nm === 'Winter' ? 0.5 : 1) * perDay;
+    if (b.type === 'farm') state.food += BUILD_DEFS.farm.foodPerDay * staffEff(b) * (b._mill || 1) * (b._wet ? 1.25 : 1) * seasonOf(state.day).farm * (state.raining ? 1.25 : 1) * perDay;
+    else if (b.type === 'orchard') state.food += BUILD_DEFS.orchard.foodPerDay * staffEff(b) * (b._wet ? 1.25 : 1) * (seasonOf(state.day).nm === 'Winter' ? 0.5 : 1) * perDay;
+    else if (b.type === 'fisher') state.food += BUILD_DEFS.fisher.foodPerDay * staffEff(b) * (seasonOf(state.day).nm === 'Winter' ? 0.5 : 1) * perDay;
     else if (b.type === 'woodcutter') state.wood += BUILD_DEFS.woodcutter.woodPerDay * staffEff(b) * (b._saw ? 1.25 : 1) * perDay;
     else if (b.type === 'quarry') state.stone += BUILD_DEFS.quarry.stonePerDay * staffEff(b) * perDay;
     else if (BUILD_DEFS[b.type].popCap) {
@@ -4363,6 +4584,34 @@ function banditTick(bd, dt) {
     return;
   }
   bd.engaged = null;
+  // the river bars the way like any wall: a raider who stops CLOSING ON his
+  // goal (sliding along the bank counts for nothing) hunts for a ford —
+  // and gives up the raid after enough failures
+  bd._chk = (bd._chk || 0) - dt;
+  if (bd._chk <= 0) {
+    bd._chk = 2;
+    const routed = bd.route && bd.route.length;
+    const dest = bd.target ? { x: bd.target.x, z: bd.target.z } : (bd.wallPt || { x: 0, z: 0 });
+    const goal = routed ? bd.route[0] : dest;
+    const gd = Math.hypot(goal.x - bd.x, goal.z - bd.z);
+    const improved = gd < (bd._gd ?? Infinity) - 0.8;
+    bd._gd = Math.min(bd._gd ?? Infinity, gd);
+    if (!improved && gd > (routed ? 2.5 : 12)) {
+      bd.route = null;
+      bd._rr = (bd._rr || 0) + 1;
+      if (bd._rr > 3) { bd.state = 'flee'; return; }
+      bd.route = findPath(bd.x, bd.z, dest.x, dest.z);
+      bd._gd = Infinity;   // a fresh route earns a fresh yardstick
+      if (!bd.route) { bd.state = 'flee'; return; }
+    }
+  }
+  if (bd.route && bd.route.length) {
+    const wp = bd.route[0];
+    moveToward(bd, wp.x, wp.z, dt);
+    if (Math.hypot(wp.x - bd.x, wp.z - bd.z) < 2.2) bd.route.shift();
+    if (bd.route.length) return;
+    bd.route = null;
+  }
   // pick / validate target
   if (!bd.target || bd.target.ruined || bd.target.depth > 0) {
     const t = raidableTargets();
@@ -4888,6 +5137,10 @@ function handleClick() {
     else msg('Click a building to paint its roof — keep clicking to cycle the dyes.', 'dim');
     return;
   }
+  if (tool === 'bridge') {
+    placeBridgeAt(mouseGround.x, mouseGround.z);
+    return;
+  }
   if (tool === 'demolish') {
     const b = pickBuilding();
     if (b) { demolish(b); saveGame(); return; }
@@ -4957,6 +5210,7 @@ function saveGame(key = 'bulwark-save') {
       walls: state.walls.map(w => ({ poly:w.poly, path:w.path, closed:w.closed,
         tier:w.tier||'wall', breached:!!w.breached, hoardings:!!w.hoardings,
         gates: w.gates.map(g => ({ seg:g.seg, t:g.t, tier:g.tier, breach:!!g.breach })) })),
+      bridges: state.bridges.map(b => ({ x:b.x, z:b.z, ang:b.ang })),
     }));
   } catch (e) {}
 }
@@ -5001,6 +5255,12 @@ function loadGame() {
     scene.add(group);
     state.walls.push({ poly, path, closed, tier: tierKey, breached: !!w.breached, hoardings: !!w.hoardings, group, gates, blockers, gatePts });
   }
+  for (const b of (s.bridges || [])) {
+    const br = { x:b.x, z:b.z, ang:b.ang, grp: makeBridgeMesh(b) };
+    scene.add(br.grp);
+    state.bridges.push(br);
+  }
+  rebuildRiverPaths();
   for (const b of s.buildings) {
     const nb = placeBuilding(b.type, b.x, b.z, true, b.rot || 0);
     nb.hp = b.hp;
@@ -5029,6 +5289,8 @@ function newTownSetup(diff = 'standard') {
   state.regionNm = region.nm;
   pendingSeed = 0; pendingRegion = null;
   makeCrest();
+  for (const b of state.bridges) { scene.remove(b.grp); disposeGroup(b.grp); }
+  state.bridges = [];
   scatterWorld(state.seed, region);
   for (const c of [...state.wild]) removeWild(c);   // the old land's animals go with it
   state.roads = [];
@@ -5441,6 +5703,15 @@ function drawMinimap() {
     const t = trees[i];
     g.fillRect(mm(t.x)-1, mm(t.z)-1, 2, 2);
   }
+  // the river in watercolor ink
+  if (riverPts.length) {
+    g.strokeStyle = '#4a7a9c'; g.lineWidth = 3; g.lineJoin = 'round';
+    g.beginPath();
+    riverPts.forEach((p, i) => { i ? g.lineTo(mm(p.x), mm(p.z)) : g.moveTo(mm(p.x), mm(p.z)); });
+    g.stroke();
+    g.fillStyle = '#8a6a44';
+    for (const c of riverCross) g.fillRect(mm(c.x)-2, mm(c.z)-2, 4, 4);
+  }
   // roads as drawn routes
   g.fillStyle = '#8a6a44';
   for (const [gx, gz] of state.roads) g.fillRect(mm(gx)-1, mm(gz)-1, 2.4, 2.4);
@@ -5705,6 +5976,8 @@ const ALM_DESC = {
   sawmill:'Boosts every woodcutter within its aura ×1.25.',
   quarry:'8 stone a day. Must stand near bare rock.',
   tradepost:'Caravans pay extra at its yard — but it must stand outside the walls.',
+  fisher:'Seven food a day from river or lake, half through winter ice. Must stand by the water.',
+  bridge:'Thrown across the river for 25 wood. Folk, carts and raiders alike cross only at bridges and fords.',
   stakes:'Sharpened stakes. Raiders that cross them bleed; the stakes wear out.',
   watchpost:'A lookout with a bow. Short reach, cheap.',
   tower:'A proper arrow tower — long reach, steady loosing.',
@@ -5735,6 +6008,7 @@ const ALM_TERMS = [
   ['Prestige','High walls and flagstone frontage make an address worth more — richer homes pay richer taxes.'],
   ['Rank','The town’s title — Hamlet, Village, Town, City — follows its highest population ever reached, and each rank unlocks new tools. See THE LADDER.'],
   ['Days of note','Every sixth day the chapel bell rings a holy day and folk walk to prayer. The first day of autumn is the HARVEST FESTIVAL — pennants fly and the town gathers at the Keep. Press P to hide the panels and watch.'],
+  ['The river','Every valley is cut by its own river. Nothing crosses except at FORDS (stepping stones) and the BRIDGES you build — so the river is a free wall, and its crossings are chokepoints worth defending. Farms and orchards near water grow ×1.25; a mill by the current grinds ×1.4; a moat dug from the GUARD tab counts as water too.'],
 ];
 let almTab = 'build';
 function renderAlmanac() {
@@ -5916,7 +6190,13 @@ window.BULWARK = {
     return { w, h, b64: btoa(bin), calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
   },
   _dbg: { renderer, scene, camera },
-  start: () => { $('intro').style.display='none'; state.started = true; if (!state.buildings.length) newTownSetup(); },
+  start: () => { $('intro').style.display='none'; state.started = true;
+    if (!state.buildings.length) { pendingRegion = REGIONS[0]; pendingSeed = 424242; newTownSetup(); } },
+  river: () => riverPts,
+  fords: () => riverFords,
+  bridgeAt: (x, z) => placeBridgeAt(x, z, true),
+  walkable: (ax, az, bx, bz) => canWalk(ax, az, bx, bz),
+  distToRiver,
   sim: (seconds, dt=0.1) => { for (let t=0;t<seconds;t+=dt) step(dt); return { ...state, buildings:state.buildings.length, walls:state.walls.length, bandits:state.bandits.length }; },
 };
 installTests();
